@@ -4,6 +4,54 @@ from app.models import Post, User, Report, Comment
 from sqlalchemy import select, event, text
 
 
+def test_invalid_cursor_values_return_validation_errors(client):
+    import base64
+    import json
+
+    a = user(client)
+    p = post(client, a)
+    approve(client, "post", p["id"])
+    values = [
+        [True, p["id"]],
+        [False, p["id"]],
+        [2**63, p["id"]],
+        [-1, p["id"]],
+        [1, "x" * 36],
+        [1, p["id"].upper()],
+        [1.5, p["id"]],
+        {"created": 1, "id": p["id"]},
+        [1],
+    ]
+    cursors = [
+        base64.urlsafe_b64encode(json.dumps(value).encode()).decode().rstrip("=")
+        for value in values
+    ]
+    valid = (
+        base64.urlsafe_b64encode(json.dumps([1, p["id"]]).encode()).decode().rstrip("=")
+    )
+    cursors += ["#" + valid, "%%%%"]
+    for cursor in cursors:
+        for path, headers in [
+            ("/posts", a),
+            ("/posts/" + p["id"] + "/comments", a),
+            ("/moderation", a),
+            ("/admin/audit", ADMIN),
+        ]:
+            response = client.get(path, headers=headers, params={"cursor": cursor})
+            assert response.status_code == 422, (path, cursor, response.text)
+    # Generated cursors and both boundaries of the SQL BIGINT range remain accepted.
+    for timestamp in [0, 2**63 - 1]:
+        cursor = (
+            base64.urlsafe_b64encode(json.dumps([timestamp, p["id"]]).encode())
+            .decode()
+            .rstrip("=")
+        )
+        assert (
+            client.get("/posts", headers=a, params={"cursor": cursor}).status_code
+            == 200
+        )
+
+
 def test_report_queue_batches_targets_and_includes_private_parent_context(client):
     a, b, reporter = user(client), user(client), user(client)
     p = post(client, a)

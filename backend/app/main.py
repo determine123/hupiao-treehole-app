@@ -169,9 +169,16 @@ def serialize_comment(c, user, p):
 def decode_cursor(cursor):
     try:
         created, id = json.loads(
-            base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4))
+            base64.b64decode(
+                cursor + "=" * (-len(cursor) % 4), altchars=b"-_", validate=True
+            )
         )
-        if not isinstance(created, int) or not isinstance(id, str) or len(id) != 36:
+        if (
+            type(created) is not int
+            or not 0 <= created <= 2**63 - 1
+            or not isinstance(id, str)
+            or str(uuid.UUID(id)) != id
+        ):
             raise ValueError()
         return created, id
     except Exception:
