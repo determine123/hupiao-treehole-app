@@ -190,12 +190,17 @@ def encode_cursor(row):
 def posts(
     category: str = "",
     view: str = "all",
+    sort: str = "latest",
     q: str = Query(default="", max_length=100),
     cursor: str = Query(default="", max_length=180),
     limit: int = Query(default=20, ge=1, le=50),
     user=Depends(identity),
     session=Depends(database),
 ):
+    if sort not in ("latest", "hot", "unanswered"):
+        raise HTTPException(422, "排序项无效")
+    if sort == "hot" and cursor:
+        raise HTTPException(422, "热门榜请刷新查看")
     statement = select(Post).where(
         Post.status.in_(["active", "pending", "hidden"])
         if view == "mine"
@@ -231,14 +236,19 @@ def posts(
                 Post.body.contains(q, autoescape=True),
             )
         )
+    if sort == "unanswered":
+        statement = statement.where(Post.replies == 0)
+    if sort == "hot":
+        statement = statement.where(Post.created >= now() - 7 * 24 * 60 * 60 * 1000)
     if cursor:
         created, id = decode_cursor(cursor)
         statement = statement.where(
             or_(Post.created < created, and_(Post.created == created, Post.id < id))
         )
-    rows = session.scalars(
-        statement.order_by(Post.created.desc(), Post.id.desc()).limit(limit + 1)
-    ).all()
+    ordering = [Post.created.desc(), Post.id.desc()]
+    if sort == "hot":
+        ordering.insert(0, (Post.likes + Post.replies * 2).desc())
+    rows = session.scalars(statement.order_by(*ordering).limit(limit + 1)).all()
     ids = [p.id for p in rows[:limit]]
     liked = (
         set(
@@ -251,7 +261,9 @@ def posts(
     )
     return {
         "posts": [serialize_post(p, user, p.id in liked) for p in rows[:limit]],
-        "next_cursor": encode_cursor(rows[limit - 1]) if len(rows) > limit else None,
+        "next_cursor": encode_cursor(rows[limit - 1])
+        if sort != "hot" and len(rows) > limit
+        else None,
     }
 
 
@@ -352,7 +364,9 @@ def like(id: str, b: Vote, user=Depends(identity), session=Depends(database)):
             )
     else:
         result = session.execute(
-            delete(Like).where(Like.post == id, Like.owner == user.id).returning(Like.post)
+            delete(Like)
+            .where(Like.post == id, Like.owner == user.id)
+            .returning(Like.post)
         )
         if result.scalar_one_or_none() is not None:
             session.execute(

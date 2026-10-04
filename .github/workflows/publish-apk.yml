@@ -2,6 +2,11 @@ name: Publish verified Android APK
 on:
   workflow_dispatch:
     inputs:
+      release_tag:
+        description: Existing beta release tag, for example v1.0.1-beta.1
+        required: true
+        default: v1.0.1-beta.1
+        type: string
       apk_url:
         description: Public EAS APK download URL
         required: true
@@ -22,13 +27,15 @@ jobs:
     env:
       APK_URL: ${{ inputs.apk_url }}
       APK_SHA256: ${{ inputs.sha256 }}
-      APK_NAME: hupiao-treehole-1.0.0-beta.1.apk
-      RELEASE_TAG: v1.0.0-beta.1
+      RELEASE_TAG: ${{ inputs.release_tag }}
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
       - name: Download and verify APK
         run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]] || { echo 'Invalid beta release tag'; exit 1; }
+          APK_NAME="hupiao-treehole-${RELEASE_TAG#v}.apk"
+          echo "APK_NAME=$APK_NAME" >> "$GITHUB_ENV"
           case "$APK_URL" in https://expo.dev/artifacts/eas/*.apk) ;; *) echo 'Unexpected artifact host'; exit 1 ;; esac
           curl --fail --location --retry 3 "$APK_URL" --output "$APK_NAME"
           printf '%s  %s\n' "$APK_SHA256" "$APK_NAME" > "$APK_NAME.sha256"

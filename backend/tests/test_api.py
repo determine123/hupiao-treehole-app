@@ -188,3 +188,39 @@ def test_validation_and_rate_limit(client):
     )
     assert client.post("/posts", headers=a, content=b"x" * 33000).status_code == 413
     assert client.delete("/posts/nonexistent", headers=a).status_code == 404
+
+
+def test_discovery_sorting_and_visibility(client):
+    from app.models import now
+
+    a, b = user(client), user(client)
+    ids = [post(client, user(client))["id"] for _ in range(5)]
+    for pid in ids[:4]:
+        approve(client, "post", pid)
+    with Session() as session:
+        rows = [session.get(Post, pid) for pid in ids]
+        rows[0].likes, rows[0].replies = 1, 2
+        rows[1].likes, rows[1].replies = 4, 0
+        rows[2].created = now() - 8 * 24 * 60 * 60 * 1000
+        rows[2].likes = 100
+        rows[4].likes = 1000  # Pending content must never enter the public ranking.
+        session.commit()
+    hot = client.get("/posts?sort=hot", headers=b).json()
+    assert [p["id"] for p in hot["posts"]] == [ids[0], ids[1], ids[3]]
+    assert hot["next_cursor"] is None
+    waiting = client.get("/posts?sort=unanswered&limit=1", headers=b).json()
+    seen = [p["id"] for p in waiting["posts"]]
+    while waiting["next_cursor"]:
+        waiting = client.get(
+            "/posts",
+            params={"sort": "unanswered", "limit": 1, "cursor": waiting["next_cursor"]},
+            headers=b,
+        ).json()
+        seen.extend(p["id"] for p in waiting["posts"])
+    assert set(seen) == set(ids[1:4]) and len(seen) == 3
+    assert client.get("/posts?sort=unknown", headers=b).status_code == 422
+    assert client.get("/posts?sort=hot&cursor=bad", headers=b).status_code == 422
+    client.post("/blocks", headers=b, json={"target_id": ids[0]})
+    assert [
+        p["id"] for p in client.get("/posts?sort=hot", headers=b).json()["posts"]
+    ] == [ids[1], ids[3]]
