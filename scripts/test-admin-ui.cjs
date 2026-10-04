@@ -11,8 +11,9 @@ class Element {
  addEventListener(name,fn){this.listeners[name]=fn;}
  querySelectorAll(tag){return this.children.flatMap(c=>[...(c.tag===tag?[c]:[]),...c.querySelectorAll(tag)]);}
 }
-const elements=Object.fromEntries(['key','logout','list','message','filter','filter-wrap','audit-target','audit-wrap','audit-more','audit-find'].map(id=>[id,new Element()]));
+const elements=Object.fromEntries(['key','logout','list','message','filter','filter-wrap','audit-target','audit-wrap','audit-more','audit-find','feedback-filter','feedback-filter-wrap'].map(id=>[id,new Element()]));
 elements.key.value='test-only-admin-key';elements.filter.value='all';
+elements['feedback-filter'].value='all';
 const navigation=['queue','reports','feedback'].map(kind=>{const button=new Element('button');button.dataset.kind=kind;return button;});
 const pending=[];
 const context=vm.createContext({document:{querySelector:s=>elements[s.slice(1)],querySelectorAll:()=>navigation,createElement:tag=>new Element(tag)},AbortController,URLSearchParams,setTimeout,clearTimeout,console,confirm:()=>true,fetch:(url,options)=>new Promise(resolve=>pending.push({url,options,resolve}))});
@@ -53,7 +54,24 @@ async function run(){
  assert.match(reportText,/举报编号：report-id · 内容编号：comment-id/);
  assert.match(reportText,/<img src=x onerror=alert\(1\)>/);
  assert.equal(reportCard.querySelectorAll('img').length,0); // User text stays literal, never HTML.
+ elements['feedback-filter'].value='new';
+ const feedback=context.load('feedback');
+ assert.match(pending[6].url,/feedback\/page\?/);
+ assert.equal(new URL(pending[6].url,'https://example.test').searchParams.get('status'),'new');
+ const record={id:'feedback-1',body:'Old unanswered problem',status:'new',kind:'bug',device:'test',app_version:'1.0.2',response:''};
+ finish(pending[6],{records:[record],next_cursor:'feedback-page-2'});
+ await feedback;assert.equal(elements['audit-more'].hidden,false);
+ assert.equal(elements['audit-more'].textContent,'加载更多反馈');
+ const feedbackMore=elements['audit-more'].onclick();
+ assert.equal(new URL(pending[7].url,'https://example.test').searchParams.get('cursor'),'feedback-page-2');
+ finish(pending[7],{records:[record,{...record,id:'feedback-2'}],next_cursor:null});
+ await feedbackMore;assert.equal(elements.list.children.length,2);assert.equal(elements['audit-more'].hidden,true);
+ const saveButton=elements.list.children[0].querySelectorAll('button').find(b=>b.textContent==='保存回复');
+ const saving=saveButton.onclick();
+ assert.equal(pending[8].options.method,'PUT');
  elements.logout.onclick();assert.equal(elements.list.children.length,0);
- console.log('Admin UI: delayed responses, audit pagination and report context rendering verified.');
+ finish(pending[8],{ok:true});await saving;
+ assert.equal(pending.length,9);assert.equal(elements.list.children.length,0);assert.match(elements.message.textContent,/已退出/);
+ console.log('Admin UI: delayed responses, audit/report context and feedback pagination verified.');
 }
 run().catch(error=>{console.error(error);process.exitCode=1;});

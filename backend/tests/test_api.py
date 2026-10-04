@@ -1,7 +1,89 @@
 from conftest import user, post, approve, ADMIN
 from app.db import Session, engine
-from app.models import Post, User, Report, Comment
+from app.models import Post, User, Report, Comment, Feedback
 from sqlalchemy import select, event, text
+
+
+def test_admin_feedback_pages_reach_old_issues_and_filter_without_duplicates(client):
+    a = user(client)
+    with Session() as session:
+        owner = session.scalar(select(User.id))
+        session.add_all(
+            [
+                Feedback(
+                    owner=owner,
+                    kind="bug",
+                    body="历史反馈",
+                    device="test",
+                    app_version="1.0.2",
+                    created=10,
+                    status="resolved",
+                    response="已解决",
+                )
+                for _ in range(105)
+            ]
+        )
+        session.add_all(
+            [
+                Feedback(
+                    owner=owner,
+                    kind="idea",
+                    body="尚待处理的旧建议",
+                    device="test",
+                    app_version="1.0.2",
+                    created=1,
+                    status="new",
+                    response="",
+                )
+                for _ in range(3)
+            ]
+        )
+        session.commit()
+        expected = list(
+            session.scalars(
+                select(Feedback.id).order_by(
+                    Feedback.created.desc(), Feedback.id.desc()
+                )
+            )
+        )
+    assert client.get("/admin/feedback/page", headers=a).status_code == 403
+    assert len(client.get("/admin/feedback", headers=ADMIN).json()) == 100
+    seen, cursor = [], ""
+    while True:
+        response = client.get(
+            "/admin/feedback/page",
+            headers=ADMIN,
+            params={"limit": 17, "cursor": cursor},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        seen.extend(r["id"] for r in data["records"])
+        assert all("owner" not in r for r in data["records"])
+        cursor = data["next_cursor"]
+        if not cursor:
+            break
+    assert seen == expected and len(set(seen)) == 108
+    first = client.get(
+        "/admin/feedback/page", headers=ADMIN, params={"status": "new", "limit": 2}
+    ).json()
+    assert len(first["records"]) == 2 and first["next_cursor"]
+    second = client.get(
+        "/admin/feedback/page",
+        headers=ADMIN,
+        params={"status": "new", "limit": 2, "cursor": first["next_cursor"]},
+    ).json()
+    assert len(second["records"]) == 1 and second["next_cursor"] is None
+    assert all(r["status"] == "new" for r in first["records"] + second["records"])
+    for params in [
+        {"status": "unknown"},
+        {"limit": 0},
+        {"limit": 51},
+        {"cursor": "bad"},
+    ]:
+        assert (
+            client.get("/admin/feedback/page", headers=ADMIN, params=params).status_code
+            == 422
+        )
 
 
 def test_invalid_cursor_values_return_validation_errors(client):

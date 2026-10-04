@@ -843,8 +843,7 @@ def reports(session=Depends(database)):
     return result
 
 
-@app.get("/admin/feedback", dependencies=[Depends(admin)])
-def feedback_queue(session=Depends(database)):
+def serialize_feedback_rows(rows):
     return [
         {
             "id": f.id,
@@ -856,10 +855,48 @@ def feedback_queue(session=Depends(database)):
             "response": f.response,
             "created": f.created,
         }
-        for f in session.scalars(
-            select(Feedback).order_by(Feedback.created.desc()).limit(100)
-        )
+        for f in rows
     ]
+
+
+@app.get("/admin/feedback", dependencies=[Depends(admin)])
+def feedback_queue(session=Depends(database)):
+    return serialize_feedback_rows(
+        session.scalars(
+            select(Feedback)
+            .order_by(Feedback.created.desc(), Feedback.id.desc())
+            .limit(100)
+        )
+    )
+
+
+@app.get("/admin/feedback/page", dependencies=[Depends(admin)])
+def feedback_page(
+    status: str = Query(
+        default="all", pattern="^(all|new|reviewing|planned|resolved|declined)$"
+    ),
+    cursor: str = Query(default="", max_length=180),
+    limit: int = Query(default=20, ge=1, le=50),
+    session=Depends(database),
+):
+    statement = select(Feedback)
+    if status != "all":
+        statement = statement.where(Feedback.status == status)
+    if cursor:
+        created, id = decode_cursor(cursor)
+        statement = statement.where(
+            or_(
+                Feedback.created < created,
+                and_(Feedback.created == created, Feedback.id < id),
+            )
+        )
+    rows = session.scalars(
+        statement.order_by(Feedback.created.desc(), Feedback.id.desc()).limit(limit + 1)
+    ).all()
+    return {
+        "records": serialize_feedback_rows(rows[:limit]),
+        "next_cursor": encode_cursor(rows[limit - 1]) if len(rows) > limit else None,
+    }
 
 
 @app.put("/admin/feedback/{id}", dependencies=[Depends(admin)])

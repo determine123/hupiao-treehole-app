@@ -13,11 +13,12 @@ body{max-width:900px;margin:24px auto;padding:20px;font:16px/1.7 system-ui;backg
 <label for="key">管理员密钥</label><input id="key" type="password" autocomplete="off" spellcheck="false">
 <nav aria-label="管理栏目"><button data-kind="queue">待审核</button><button data-kind="reports">举报</button><button data-kind="feedback">内测反馈</button><button data-kind="audit">审核记录</button><button id="logout">退出并清空</button></nav>
 <label id="filter-wrap" hidden>审核类型 <select id="filter"><option value="all">全部</option><option value="post">帖子</option><option value="comment">回复</option></select></label>
+<label id="feedback-filter-wrap" hidden>反馈状态 <select id="feedback-filter"><option value="all">全部</option><option value="new">新反馈</option><option value="reviewing">处理中</option><option value="planned">已计划</option><option value="resolved">已解决</option><option value="declined">暂不采纳</option></select></label>
 <div id="audit-wrap" hidden><label for="audit-target">按完整内容编号查找（可留空）</label><input id="audit-target" maxlength="36" placeholder="帖子或回复的完整编号"><button id="audit-find">查找记录</button></div><p id="message" role="status" aria-live="polite"></p><main id="list" aria-busy="false"></main><button id="audit-more" hidden>加载更多审核记录</button>
 <script>
 const el=s=>document.querySelector(s);
 const labels={post:'帖子',comment:'回复',pending:'待审核',active:'已公开',hidden:'已隐藏',deleted:'已删除',new:'新反馈',reviewing:'处理中',planned:'已计划',resolved:'已解决',declined:'暂不采纳',approve:'通过',hide:'隐藏',unknown:'旧记录'};
-let generation=0,loadId=0,currentKind='queue',rows=[],auditCursor=null,auditTarget="";
+let generation=0,loadId=0,currentKind='queue',rows=[],auditCursor=null,auditTarget="",feedbackStatus='all';
 const requests=new Set();
 function invalidate(clearKey){generation++;loadId++;for(const c of requests)c.abort();requests.clear();rows=[];auditCursor=null;el('#audit-more').hidden=true;el('#list').replaceChildren();el('#list').setAttribute('aria-busy','false');if(clearKey)el('#key').value='';el('#message').textContent=clearKey?'已退出，页面内容与密钥已清空。':'密钥已更改，请选择管理栏目。';}
 el('#logout').onclick=()=>invalidate(true);
@@ -55,7 +56,7 @@ function render(){
    const response=node('textarea','');response.value=r.response||'';response.placeholder='回复测试者';response.setAttribute('aria-label','反馈回复');
    const states=document.createElement('select');states.setAttribute('aria-label','反馈处理状态');
    for(const state of ['new','reviewing','planned','resolved','declined']){const option=node('option',labels[state]);option.value=state;states.append(option);}states.value=r.status;
-   card.append(response,states,action(card,'保存回复',async()=>{await api('feedback/'+r.id,'PUT',{response:response.value,status:states.value});el('#message').textContent='已保存，用户可在应用的反馈记录中看到回复。';}));
+   card.append(response,states,action(card,'保存回复',async()=>{const ticket=generation,view=loadId;await api('feedback/'+r.id,'PUT',{response:response.value,status:states.value});if(ticket!==generation||view!==loadId)return;const refresh=load('feedback'),refreshId=loadId;await refresh;if(ticket===generation&&refreshId===loadId)el('#message').textContent='已保存，列表已刷新，用户可在应用的反馈记录中看到回复。';}));
   }else{
    const note=node('textarea','');note.maxLength=300;note.placeholder='内部处理依据（至少两个字），仅管理员可见';note.setAttribute('aria-label','内部处理依据');const publicReason=node('textarea','');publicReason.maxLength=300;publicReason.placeholder='给作者的说明（可选，最多300字），不要包含举报人信息或隐私';publicReason.setAttribute('aria-label','给作者的说明');card.append(note,publicReason);
    const controls=node('div','');controls.className='actions';
@@ -67,12 +68,12 @@ function render(){
  }
 }
 async function load(kind,more=false){
- const ticket=++loadId,currentGeneration=generation;currentKind=kind;if(!more){rows=[];auditCursor=null;auditTarget=el('#audit-target').value.trim();el('#list').replaceChildren();}el('#audit-more').hidden=true;el('#list').setAttribute('aria-busy','true');el('#message').textContent='正在读取，免费服务器唤醒时可能需要约一分钟…';
- el('#filter-wrap').hidden=kind!=='queue';el('#audit-wrap').hidden=kind!=='audit';document.querySelectorAll('[data-kind]').forEach(b=>b.classList.toggle('active',b.dataset.kind===kind));
- try{const path=kind==='audit'?'audit?'+new URLSearchParams({target:auditTarget,...(more&&auditCursor?{cursor:auditCursor}:{})}):kind;const data=await api(path);if(ticket!==loadId||currentGeneration!==generation)return;if(kind==='audit'){rows=more?[...rows,...data.records.filter(r=>!rows.some(old=>old.id===r.id))]:data.records;auditCursor=data.next_cursor;el('#audit-more').hidden=!auditCursor;}else rows=data;render();}
- catch(e){if(ticket===loadId&&currentGeneration===generation)el('#message').textContent=e.name==='AbortError'?'连接超时，请再次点击栏目重试。':e.message;}
+ const ticket=++loadId,currentGeneration=generation;currentKind=kind;if(!more){rows=[];auditCursor=null;auditTarget=el('#audit-target').value.trim();feedbackStatus=el('#feedback-filter').value;el('#list').replaceChildren();}el('#audit-more').hidden=true;el('#audit-more').textContent=kind==='feedback'?'加载更多反馈':'加载更多审核记录';el('#list').setAttribute('aria-busy','true');el('#message').textContent='正在读取，免费服务器唤醒时可能需要约一分钟…';
+ el('#filter-wrap').hidden=kind!=='queue';el('#audit-wrap').hidden=kind!=='audit';el('#feedback-filter-wrap').hidden=kind!=='feedback';document.querySelectorAll('[data-kind]').forEach(b=>b.classList.toggle('active',b.dataset.kind===kind));
+ try{const paged=kind==='audit'||kind==='feedback';const path=paged?(kind==='feedback'?'feedback/page?':'audit?')+new URLSearchParams({...(kind==='feedback'?{status:feedbackStatus}:{target:auditTarget}),...(more&&auditCursor?{cursor:auditCursor}:{})}):kind;const data=await api(path);if(ticket!==loadId||currentGeneration!==generation)return;if(paged){rows=more?[...rows,...data.records.filter(r=>!rows.some(old=>old.id===r.id))]:data.records;auditCursor=data.next_cursor;el('#audit-more').hidden=!auditCursor;}else rows=data;render();}
+ catch(e){if(ticket===loadId&&currentGeneration===generation){el('#message').textContent=e.name==='AbortError'?'连接超时，请再次点击栏目重试。':e.message;el('#audit-more').hidden=!auditCursor;}}
  finally{if(ticket===loadId&&currentGeneration===generation)el('#list').setAttribute('aria-busy','false');}
 }
-document.querySelectorAll('[data-kind]').forEach(b=>b.onclick=()=>load(b.dataset.kind));el('#filter').onchange=render;el('#audit-find').onclick=()=>load('audit');el('#audit-more').onclick=()=>load('audit',true);
+document.querySelectorAll('[data-kind]').forEach(b=>b.onclick=()=>load(b.dataset.kind));el('#filter').onchange=render;el('#feedback-filter').onchange=()=>load('feedback');el('#audit-find').onclick=()=>load('audit');el('#audit-more').onclick=()=>load(currentKind,true);
 </script>
 </body></html>
