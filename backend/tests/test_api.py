@@ -1,7 +1,133 @@
 from conftest import user, post, approve, ADMIN
 from app.db import Session, engine
-from app.models import Post, User
+from app.models import Post, User, Report, Comment
 from sqlalchemy import select, event, text
+
+
+def test_deleted_content_reports_leave_queue_without_closing_unrelated_reports(client):
+    a, b, reporter = user(client), user(client), user(client)
+    p, retained = post(client, a), post(client, b)
+    approve(client, "post", p["id"])
+    approve(client, "post", retained["id"])
+    c = client.post(
+        "/posts/" + p["id"] + "/comments", headers=b, json={"body": "被连带删除的回复"}
+    ).json()
+    approve(client, "comment", c["id"])
+    for kind, target in [
+        ("post", p["id"]),
+        ("comment", c["id"]),
+        ("post", retained["id"]),
+    ]:
+        assert (
+            client.post(
+                "/reports",
+                headers=reporter,
+                json={
+                    "target_type": kind,
+                    "target_id": target,
+                    "reason": "请检查这条内容",
+                },
+            ).status_code
+            == 201
+        )
+    assert client.delete("/posts/" + p["id"], headers=b).status_code == 404
+    assert len(client.get("/admin/reports", headers=ADMIN).json()) == 3
+    assert client.delete("/posts/" + p["id"], headers=a).status_code == 200
+    queue = client.get("/admin/reports", headers=ADMIN).json()
+    assert [r["target_id"] for r in queue] == [retained["id"]]
+    with Session() as session:
+        assert session.get(Comment, c["id"]) is None
+        assert set(
+            session.scalars(
+                select(Report.status).where(Report.target_id.in_([p["id"], c["id"]]))
+            )
+        ) == {"resolved"}
+
+
+def test_comment_and_identity_deletion_resolve_external_reports(client):
+    a, b, reporter = user(client), user(client), user(client)
+    own, retained = post(client, a), post(client, b)
+    for p in [own, retained]:
+        approve(client, "post", p["id"])
+    comments = []
+    for p, author in [(retained, a), (retained, a), (own, b)]:
+        c = client.post(
+            "/posts/" + p["id"] + "/comments",
+            headers=author,
+            json={"body": "身份删除和单条回复删除测试"},
+        ).json()
+        approve(client, "comment", c["id"])
+        comments.append(c)
+    for kind, target in [("post", own["id"]), ("post", retained["id"])] + [
+        ("comment", c["id"]) for c in comments
+    ]:
+        assert (
+            client.post(
+                "/reports",
+                headers=reporter,
+                json={
+                    "target_type": kind,
+                    "target_id": target,
+                    "reason": "请检查这条内容",
+                },
+            ).status_code
+            == 201
+        )
+    assert client.delete("/comments/" + comments[0]["id"], headers=a).status_code == 200
+    assert len(client.get("/admin/reports", headers=ADMIN).json()) == 4
+    assert client.delete("/me", headers=a).status_code == 200
+    assert [
+        r["target_id"] for r in client.get("/admin/reports", headers=ADMIN).json()
+    ] == [retained["id"]]
+    assert (
+        client.get("/posts/" + retained["id"], headers=b).json()["post"]["replies"] == 0
+    )
+    with Session() as session:
+        rows = session.scalars(select(Report)).all()
+        assert (
+            len(rows) == 5
+        )  # Keep report records; content removal is not an admin decision.
+        assert sum(r.status == "resolved" for r in rows) == 4
+
+
+def test_legacy_missing_report_targets_do_not_fill_admin_queue(client):
+    a, b = user(client), user(client)
+    p = post(client, a)
+    approve(client, "post", p["id"])
+    assert (
+        client.post(
+            "/reports",
+            headers=b,
+            json={
+                "target_type": "post",
+                "target_id": p["id"],
+                "reason": "仍然需要处理的举报",
+            },
+        ).status_code
+        == 201
+    )
+    with Session() as session:
+        owner = session.scalar(
+            select(User.id).where(User.id != session.get(Post, p["id"]).owner)
+        )
+        import uuid
+
+        session.add_all(
+            [
+                Report(
+                    owner=owner,
+                    target_type="post",
+                    target_id=str(uuid.uuid4()),
+                    reason="历史已删除内容",
+                    created=0,
+                )
+                for _ in range(101)
+            ]
+        )
+        session.commit()
+    assert [
+        r["target_id"] for r in client.get("/admin/reports", headers=ADMIN).json()
+    ] == [p["id"]]
 
 
 def test_consent_and_auth(client):

@@ -385,11 +385,28 @@ def like(id: str, b: Vote, user=Depends(identity), session=Depends(database)):
     return {"liked": b.liked, "likes": p.likes}
 
 
+def resolve_removed_reports(session, posts, comments):
+    # Evaluate descendant IDs before cascading deletion, within the same transaction.
+    session.execute(
+        update(Report)
+        .where(
+            Report.status == "open",
+            or_(
+                and_(Report.target_type == "post", Report.target_id.in_(posts)),
+                and_(Report.target_type == "comment", Report.target_id.in_(comments)),
+            ),
+        )
+        .values(status="resolved")
+        .execution_options(synchronize_session=False)
+    )
+
+
 @app.delete("/posts/{id}")
 def delete_post(id: str, user=Depends(identity), session=Depends(database)):
     p = session.get(Post, id)
     if not p or p.owner != user.id:
         raise HTTPException(404, "无法删除这条讨论")
+    resolve_removed_reports(session, [id], select(Comment.id).where(Comment.post == id))
     session.delete(p)
     session.commit()
     return {"ok": True}
@@ -400,6 +417,7 @@ def delete_comment(id: str, user=Depends(identity), session=Depends(database)):
     c = session.get(Comment, id)
     if not c or c.owner != user.id:
         raise HTTPException(404, "无法删除这条回复")
+    resolve_removed_reports(session, [], [id])
     if c.status == "active":
         session.execute(
             update(Post)
@@ -509,6 +527,11 @@ def my_feedback(user=Depends(identity), session=Depends(database)):
 
 @app.delete("/me")
 def delete_identity(user=Depends(identity), session=Depends(database)):
+    owned_posts = select(Post.id).where(Post.owner == user.id)
+    removed_comments = select(Comment.id).where(
+        or_(Comment.owner == user.id, Comment.post.in_(owned_posts))
+    )
+    resolve_removed_reports(session, owned_posts, removed_comments)
     # Recompute affected counters inside the same deletion transaction.
     liked = session.scalars(select(Like.post).where(Like.owner == user.id)).all()
     replied = session.scalars(
@@ -738,7 +761,19 @@ def reports(session=Depends(database)):
     result = []
     for r in session.scalars(
         select(Report)
-        .where(Report.status == "open")
+        .where(
+            Report.status == "open",
+            or_(
+                and_(
+                    Report.target_type == "post",
+                    exists().where(Post.id == Report.target_id),
+                ),
+                and_(
+                    Report.target_type == "comment",
+                    exists().where(Comment.id == Report.target_id),
+                ),
+            ),
+        )
         .order_by(Report.created)
         .limit(100)
     ):
