@@ -1,0 +1,14 @@
+{
+  "apiUrl": "https://hupiao-api-beta.onrender.com",
+  "checks": [
+    "PostgreSQL + Redis readiness",
+    "HTTPS public configuration",
+    "Anonymous session and pre-publication moderation",
+    "PostgreSQL idempotent voting",
+    "Reply moderation and counters",
+    "Private beta feedback and administrator response",
+    "Report and author blocking",
+    "Identity deletion, token revocation and counter cleanup"
+  ],
+  "testContentRemoved": true
+}
