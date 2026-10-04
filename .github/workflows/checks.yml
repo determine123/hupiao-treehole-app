@@ -21,7 +21,7 @@ jobs:
       - run: pip install -r backend/requirements.lock.txt
       - run: python -m pytest tests -q
         working-directory: backend
-      - run: python -m ruff check app tests --select F
+      - run: python -m ruff check app tests backup.py --select F
         working-directory: backend
       - run: node scripts/test-admin-ui.cjs
   mobile:

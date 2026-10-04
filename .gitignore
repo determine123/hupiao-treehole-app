@@ -18,6 +18,8 @@
 **/*.p12
 **/*.mobileprovision
 backups/
+**/*.jsonl.gz
+**/*.dpapi
 reports/
 **/.claude/
 **/.env.*

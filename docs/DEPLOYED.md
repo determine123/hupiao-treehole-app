@@ -1,5 +1,7 @@
 # 已部署的安卓内测后端
 
+2026-10-04 已完成真实 PostgreSQL 只读快照备份、Windows DPAPI 加密与解密哈希核对，并将快照恢复到本机隔离的空 SQLite 数据库，使用 Alembic b39a807de214 后逐表逐列比较通过。快照仅保存在本机私有目录；临时单 IP 外部访问规则已移除，线上数据库没有恢复或清空。此验证不代表跨设备灾备或服务切换已经完成，操作说明见 [BACKUP.md](BACKUP.md)。
+
 - 源码：https://github.com/determine123/hupiao-treehole-app
 - API：https://hupiao-api-beta.onrender.com
 - 健康状态：https://hupiao-api-beta.onrender.com/health
