@@ -12,22 +12,24 @@
 
 ```sh
 cd mobile
-npx eas-cli login
-npx eas-cli init
+npx eas-cli@latest login
+npx eas-cli@latest init
 # 在构建环境设置真实 HTTPS 的 EXPO_PUBLIC_API_URL
-npx eas-cli build --platform android --profile preview
-npx eas-cli build --platform ios --profile ios-simulator
-npx eas-cli build --platform android --profile production
-npx eas-cli build --platform ios --profile production
+npx eas-cli@latest build --platform android --profile preview
+npx eas-cli@latest build --platform ios --profile ios-simulator
+npx eas-cli@latest build --platform android --profile production
+npx eas-cli@latest build --platform ios --profile production
 ```
 
 Android preview 生成内部测试 APK；ios-simulator 仅供模拟器，不能安装到普通 iPhone。iOS 真机内测使用签名构建通过 TestFlight 分发，或配置 Ad Hoc 并注册设备。确认包名 `com.determine123.hupiao`、EAS projectId、隐私政策 URL、截图、客服联系方式和审核说明后，再提交商店。
 
 ## 尚未通过的发布门槛
 
-- 本机没有 Android SDK / Xcode，尚未生成 APK/AAB/IPA，也没有完成真机内测。
-- Python 后端没有正式服务器，不能以现有网站地址替代新 API；旧网站没有切换或迁移数据。
+- 本机没有 Android SDK / Xcode，安卓通过 EAS 云构建；iOS 尚未构建，也没有完成真机内测。
+- Python 后端已部署 Render 内测实例并通过 PostgreSQL/Redis 公网验证；长期生产资源尚未配置。旧网站没有切换或迁移数据。
 - 2026-10-04 npm 审计仍有 19 个 high 条目，主要沿依赖链传播自 braces、node-forge，当时注册表最新版仍受影响。已经更新 decode-uri-component 和 uuid 的兼容覆盖版本。正式发布前需要升级或安全修复并重新验证，不能宣称审计通过；不要强制降级整套 Expo。
 - 需要人工审核运营与正式隐私政策。举报/屏蔽入口不保证 Apple 接受匿名 UGC 应用。
 
 [EAS 官方指南](https://docs.expo.dev/build/setup/) · [Apple 审核规则](https://developer.apple.com/app-store/review/guidelines/)
+
+补充依赖范围核对：本机 Android 正式资源导出的 source map 包含 1,249 个模块，未包含 braces 或 node-forge（见 `runtime-dependency-scope.json`）。目前剩余 npm 问题涉及构建依赖；此检查不是完整 APK 原生安全审计，也不能替代构建工具升级。

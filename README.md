@@ -41,4 +41,6 @@ npm run export:mobile
 
 [发布步骤](docs/RELEASE.md) · [内测流程](docs/BETA.md) · [数据与性能说明](docs/ARCHITECTURE.md)
 
-当前未生成签名 APK/IPA、未部署正式 Python 服务器、未提交商店。JS 资源导出不等于原生安装包。正式发布还需要服务器、联系邮箱、开发者账号、真机测试及清理已知依赖漏洞。
+安卓签名 APK 已构建并校验：[下载页面](https://github.com/determine123/hupiao-treehole-app/releases/tag/v1.0.0-beta.1)。支持 Android 7.0 及以上，约 93 MiB，已经内置服务器地址。
+
+Python 内测后端已部署到 [Render](https://hupiao-api-beta.onrender.com/health)，已通过公网功能验证及 PostgreSQL CI。iOS 未生成 IPA，两个平台均未提交商店。正式发布仍需真机内测、构建工具升级及长期服务器方案。详见 [本次部署记录](docs/DEPLOYED.md)。

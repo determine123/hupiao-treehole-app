@@ -1,0 +1,7 @@
+{
+  "platform": "android",
+  "sourceModuleCount": 1249,
+  "bracesBundled": false,
+  "nodeForgeBundled": false,
+  "scope": "Local production Android export source map, not a full native dependency audit"
+}
