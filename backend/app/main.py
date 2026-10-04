@@ -291,6 +291,7 @@ def read_post(id: str, user=Depends(identity), session=Depends(database)):
 @app.get("/posts/{id}/comments")
 def comments(
     id: str,
+    include_hidden: bool = False,
     cursor: str = Query(default="", max_length=180),
     user=Depends(identity),
     session=Depends(database),
@@ -300,7 +301,12 @@ def comments(
         Comment.post == id,
         or_(
             Comment.status == "active",
-            and_(Comment.owner == user.id, Comment.status == "pending"),
+            and_(
+                Comment.owner == user.id,
+                Comment.status.in_(
+                    ["pending", "hidden"] if include_hidden else ["pending"]
+                ),
+            ),
         ),
         unblocked(Comment, user),
     )
@@ -584,8 +590,112 @@ def queue(session=Depends(database)):
     ]
 
 
+def audit_page(statement, cursor, limit, session):
+    if cursor:
+        created, aid = decode_cursor(cursor)
+        statement = statement.where(
+            or_(Audit.created < created, and_(Audit.created == created, Audit.id < aid))
+        )
+    rows = session.scalars(
+        statement.order_by(Audit.created.desc(), Audit.id.desc()).limit(limit + 1)
+    ).all()
+    return rows[:limit], encode_cursor(rows[limit - 1]) if len(rows) > limit else None
+
+
+def public_audit(row):
+    # Internal notes remain exclusively in the administrator endpoint.
+    return {
+        "id": row.id,
+        "target_id": row.target,
+        "target_type": row.target_type,
+        "decision": row.action,
+        "reason": row.public_reason,
+        "created": row.created,
+    }
+
+
+@app.get("/moderation")
+def my_moderation(
+    cursor: str = Query(default="", max_length=180),
+    limit: int = Query(default=20, ge=1, le=50),
+    user=Depends(identity),
+    session=Depends(database),
+):
+    statement = select(Audit).where(
+        or_(
+            exists(
+                select(Post.id).where(
+                    Post.id == Audit.target,
+                    Post.owner == user.id,
+                    Audit.target_type.in_(["post", "unknown"]),
+                )
+            ),
+            exists(
+                select(Comment.id).where(
+                    Comment.id == Audit.target,
+                    Comment.owner == user.id,
+                    Audit.target_type.in_(["comment", "unknown"]),
+                )
+            ),
+        )
+    )
+    rows, next_cursor = audit_page(statement, cursor, limit, session)
+    ids = [row.target for row in rows]
+    own_posts = (
+        {
+            p.id: p
+            for p in session.scalars(
+                select(Post).where(Post.id.in_(ids), Post.owner == user.id)
+            ).all()
+        }
+        if ids
+        else {}
+    )
+    own_comments = (
+        {
+            c.id: c
+            for c in session.scalars(
+                select(Comment).where(Comment.id.in_(ids), Comment.owner == user.id)
+            ).all()
+        }
+        if ids
+        else {}
+    )
+    records = []
+    for row in rows:
+        record = public_audit(row)
+        if row.target in own_posts:
+            p = own_posts[row.target]
+            record.update(target_type="post", title=p.title, preview=p.body[:160])
+        else:
+            c = own_comments[row.target]
+            record.update(target_type="comment", title="我的回复", preview=c.body[:160])
+        records.append(record)
+    return {"records": records, "next_cursor": next_cursor}
+
+
+@app.get("/admin/audit", dependencies=[Depends(admin)])
+def audit_history(
+    target: str = Query(default="", max_length=36),
+    cursor: str = Query(default="", max_length=180),
+    limit: int = Query(default=20, ge=1, le=50),
+    session=Depends(database),
+):
+    if target and len(target) != 36:
+        raise HTTPException(422, "内容编号应为完整的 36 位编号")
+    statement = select(Audit)
+    if target:
+        statement = statement.where(Audit.target == target)
+    rows, next_cursor = audit_page(statement, cursor, limit, session)
+    return {
+        "records": [{**public_audit(row), "note": row.note} for row in rows],
+        "next_cursor": next_cursor,
+    }
+
+
 @app.post("/admin/moderate", dependencies=[Depends(admin)])
 def moderate(b: ModerateInput, session=Depends(database)):
+    safety(b.public_reason)
     model = Post if b.target_type == "post" else Comment
     obj = session.scalar(select(model).where(model.id == b.target_id).with_for_update())
     if not obj:
@@ -604,7 +714,15 @@ def moderate(b: ModerateInput, session=Depends(database)):
                     )
                 )
             )
-    session.add(Audit(target=obj.id, action=b.decision, note=b.note))
+    session.add(
+        Audit(
+            target=obj.id,
+            target_type=b.target_type,
+            action=b.decision,
+            note=b.note,
+            public_reason=b.public_reason,
+        )
+    )
     if b.decision == "hide":
         session.execute(
             update(Report)

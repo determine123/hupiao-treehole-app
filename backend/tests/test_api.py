@@ -249,3 +249,124 @@ def test_review_queue_includes_parent_context_only_for_admin(client):
         session.commit()
     comment = client.get("/admin/queue", headers=ADMIN).json()[0]
     assert len(comment["parent_excerpt"]) == 500
+
+
+def test_moderation_history_separates_private_notes_and_owner_access(client):
+    a, b = user(client), user(client)
+    pa, pb = post(client, a), post(client, b)
+
+    def decide(pid, decision, reason):
+        r = client.post(
+            "/admin/moderate",
+            headers=ADMIN,
+            json={
+                "target_type": "post",
+                "target_id": pid,
+                "decision": decision,
+                "note": "内部记录：不得给作者查看",
+                "public_reason": reason,
+            },
+        )
+        assert r.status_code == 200, r.text
+
+    decide(pa["id"], "hide", "请移除可识别的个人信息")
+    decide(pa["id"], "approve", "已复核通过")
+    decide(pb["id"], "hide", "另一位作者的说明")
+    assert client.get("/admin/audit", headers=a).status_code == 403
+    mine = client.get("/moderation", headers=a).json()["records"]
+    assert len(mine) == 2 and all(x["target_id"] == pa["id"] for x in mine)
+    assert {x["reason"] for x in mine} == {"请移除可识别的个人信息", "已复核通过"}
+    assert all("note" not in x for x in mine)
+    assert "内部记录" not in str(mine) and "另一位作者" not in str(mine)
+    assert len(client.get("/moderation", headers=b).json()["records"]) == 1
+    seen = []
+    cursor = ""
+    while True:
+        page = client.get(
+            "/admin/audit",
+            headers=ADMIN,
+            params={"limit": 1, **({"cursor": cursor} if cursor else {})},
+        ).json()
+        seen.extend(x["id"] for x in page["records"])
+        cursor = page["next_cursor"]
+        if not cursor:
+            break
+    assert len(seen) == len(set(seen)) == 3
+    filtered = client.get(
+        "/admin/audit", headers=ADMIN, params={"target": pa["id"]}
+    ).json()["records"]
+    assert len(filtered) == 2 and all("内部记录" in x["note"] for x in filtered)
+    assert client.get("/admin/audit?target=short", headers=ADMIN).status_code == 422
+    assert client.get("/moderation?cursor=broken", headers=a).status_code == 422
+    assert client.delete("/posts/" + pa["id"], headers=a).status_code == 200
+    assert client.get("/moderation", headers=a).json()["records"] == []
+
+
+def test_hidden_reply_and_legacy_reason_privacy(client):
+    from app.models import Audit, now
+
+    a, b = user(client), user(client)
+    p = post(client, a)
+    approve(client, "post", p["id"])
+    r = client.post(
+        "/posts/" + p["id"] + "/comments",
+        headers=b,
+        json={"body": "这个回复属于第二位作者"},
+    ).json()
+    response = client.post(
+        "/admin/moderate",
+        headers=ADMIN,
+        json={
+            "target_type": "comment",
+            "target_id": r["id"],
+            "decision": "hide",
+            "note": "内部记录",
+            "public_reason": "请补充事实来源",
+        },
+    )
+    assert response.status_code == 200
+    assert (
+        client.get("/posts/" + p["id"] + "/comments", headers=a).json()["comments"]
+        == []
+    )
+    own = client.get(
+        "/posts/" + p["id"] + "/comments?include_hidden=true", headers=b
+    ).json()["comments"]
+    assert (
+        client.get("/posts/" + p["id"] + "/comments", headers=b).json()["comments"]
+        == []
+    )
+    assert (
+        client.get(
+            "/posts/" + p["id"] + "/comments?include_hidden=true", headers=a
+        ).json()["comments"]
+        == []
+    )
+    assert len(own) == 1 and own[0]["status"] == "hidden"
+    records = client.get("/moderation", headers=b).json()["records"]
+    assert (
+        records[0]["reason"] == "请补充事实来源"
+        and records[0]["target_type"] == "comment"
+    )
+    with Session() as session:
+        session.add(
+            Audit(target=p["id"], action="hide", note="旧的内部秘密", created=now())
+        )
+        session.commit()
+    public = client.get("/moderation", headers=a).json()["records"]
+    assert all(not x["reason"] for x in public) and "旧的内部秘密" not in str(public)
+    unsafe = client.post(
+        "/admin/moderate",
+        headers=ADMIN,
+        json={
+            "target_type": "post",
+            "target_id": p["id"],
+            "decision": "hide",
+            "note": "内部记录",
+            "public_reason": "联系 13800138000",
+        },
+    )
+    assert unsafe.status_code == 422
+    assert (
+        client.get("/posts/" + p["id"], headers=b).json()["post"]["status"] == "active"
+    )

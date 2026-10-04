@@ -68,6 +68,7 @@ class ModerateInput(Input):
     target_id: str = Field(min_length=36, max_length=36)
     decision: Literal["approve", "hide"]
     note: str = Field(min_length=2, max_length=300)
+    public_reason: str = Field(default="", max_length=300)
 
 
 class FeedbackReply(Input):

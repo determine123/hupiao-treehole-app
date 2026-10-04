@@ -119,7 +119,17 @@ class Audit(Base):
     target: Mapped[str] = mapped_column(String(36))
     action: Mapped[str] = mapped_column(String(30))
     note: Mapped[str] = mapped_column(String(300))
+    target_type: Mapped[str] = mapped_column(
+        String(16), default="unknown", server_default="unknown"
+    )
+    public_reason: Mapped[str] = mapped_column(
+        String(300), default="", server_default=""
+    )
     created: Mapped[int] = mapped_column(BigInteger, default=now)
+    __table_args__ = (
+        Index("audit_feed", "created", "id"),
+        Index("audit_target_feed", "target", "target_type", "created", "id"),
+    )
 
 
 class RateBucket(Base):

@@ -11,15 +11,15 @@ body{max-width:900px;margin:24px auto;padding:20px;font:16px/1.7 system-ui;backg
 <h1>沪漂树洞 · 内容管理</h1>
 <p class="muted">逐条阅读后决定。密钥只保存在当前页面内存，刷新或退出后需要重新输入。</p>
 <label for="key">管理员密钥</label><input id="key" type="password" autocomplete="off" spellcheck="false">
-<nav aria-label="管理栏目"><button data-kind="queue">待审核</button><button data-kind="reports">举报</button><button data-kind="feedback">内测反馈</button><button id="logout">退出并清空</button></nav>
+<nav aria-label="管理栏目"><button data-kind="queue">待审核</button><button data-kind="reports">举报</button><button data-kind="feedback">内测反馈</button><button data-kind="audit">审核记录</button><button id="logout">退出并清空</button></nav>
 <label id="filter-wrap" hidden>审核类型 <select id="filter"><option value="all">全部</option><option value="post">帖子</option><option value="comment">回复</option></select></label>
-<p id="message" role="status" aria-live="polite"></p><main id="list" aria-busy="false"></main>
+<div id="audit-wrap" hidden><label for="audit-target">按完整内容编号查找（可留空）</label><input id="audit-target" maxlength="36" placeholder="帖子或回复的完整编号"><button id="audit-find">查找记录</button></div><p id="message" role="status" aria-live="polite"></p><main id="list" aria-busy="false"></main><button id="audit-more" hidden>加载更多审核记录</button>
 <script>
 const el=s=>document.querySelector(s);
-const labels={post:'帖子',comment:'回复',pending:'待审核',active:'已公开',hidden:'已隐藏',deleted:'已删除',new:'新反馈',reviewing:'处理中',planned:'已计划',resolved:'已解决',declined:'暂不采纳'};
-let generation=0,loadId=0,currentKind='queue',rows=[];
+const labels={post:'帖子',comment:'回复',pending:'待审核',active:'已公开',hidden:'已隐藏',deleted:'已删除',new:'新反馈',reviewing:'处理中',planned:'已计划',resolved:'已解决',declined:'暂不采纳',approve:'通过',hide:'隐藏',unknown:'旧记录'};
+let generation=0,loadId=0,currentKind='queue',rows=[],auditCursor=null,auditTarget="";
 const requests=new Set();
-function invalidate(clearKey){generation++;loadId++;for(const c of requests)c.abort();requests.clear();rows=[];el('#list').replaceChildren();el('#list').setAttribute('aria-busy','false');if(clearKey)el('#key').value='';el('#message').textContent=clearKey?'已退出，页面内容与密钥已清空。':'密钥已更改，请选择管理栏目。';}
+function invalidate(clearKey){generation++;loadId++;for(const c of requests)c.abort();requests.clear();rows=[];auditCursor=null;el('#audit-more').hidden=true;el('#list').replaceChildren();el('#list').setAttribute('aria-busy','false');if(clearKey)el('#key').value='';el('#message').textContent=clearKey?'已退出，页面内容与密钥已清空。':'密钥已更改，请选择管理栏目。';}
 el('#logout').onclick=()=>invalidate(true);
 el('#key').addEventListener('input',()=>invalidate(false));
 async function api(path,method='GET',body){
@@ -34,7 +34,7 @@ async function api(path,method='GET',body){
  }finally{clearTimeout(timer);requests.delete(controller);}
 }
 function node(tag,text){const n=document.createElement(tag);n.textContent=text;return n;}
-function summary(){const shown=currentKind==='queue'&&el('#filter').value!=='all'?rows.filter(r=>r.type===el('#filter').value):rows;el('#message').textContent=rows.length?'显示 '+shown.length+' / '+rows.length+' 条记录'+(currentKind==='queue'?'（每次最多读取 100 条帖子和 100 条回复）':''):'当前没有'+(currentKind==='queue'?'待审核内容':currentKind==='reports'?'待处理举报':'内测反馈')+'。';return shown;}
+function summary(){const shown=currentKind==='queue'&&el('#filter').value!=='all'?rows.filter(r=>r.type===el('#filter').value):rows;el('#message').textContent=rows.length?'显示 '+shown.length+' / '+rows.length+' 条记录'+(currentKind==='queue'?'（每次最多读取 100 条帖子和 100 条回复）':''):'当前没有'+(currentKind==='queue'?'待审核内容':currentKind==='reports'?'待处理举报':currentKind==='audit'?'审核记录':'内测反馈')+'。';return shown;}
 function action(card,text,fn){const button=node('button',text);button.type='button';button.onclick=async()=>{const ticket=generation;const buttons=card.querySelectorAll('button');buttons.forEach(b=>b.disabled=true);try{await fn();}catch(e){if(ticket===generation)el('#message').textContent=e.name==='AbortError'?'请求超时，请刷新列表确认处理结果后再重试。':e.message;}finally{if(ticket===generation)buttons.forEach(b=>b.disabled=false);}};return button;}
 function render(){
  el('#list').replaceChildren();const shown=summary();
@@ -46,6 +46,7 @@ function render(){
    const context=node('details','');context.className='context';context.append(node('summary','原帖上下文 · '+(labels[r.parent_status]||r.parent_status)));
    context.append(node('strong',r.parent_title),node('pre',r.parent_excerpt||'暂无原帖摘要'),node('small','原帖摘要最多展示 500 字；原帖编号：'+r.post));card.append(context);
   }
+  if(currentKind==='audit'){card.replaceChildren(node('h3',(labels[r.target_type]||r.target_type)+' · '+(labels[r.decision]||r.decision)),node('p',new Date(r.created).toLocaleString('zh-CN')),node('small','内容编号：'+r.target_id),node('p','给作者的说明：'+(r.reason||'未填写')),node('pre','内部记录：'+r.note));el('#list').append(card);continue;}
   card.append(node('pre',r.body),node('small','编号：'+r.id));
   if(r.reason)card.append(node('p','举报原因：'+r.reason));
   if(currentKind==='feedback'){
@@ -55,22 +56,22 @@ function render(){
    for(const state of ['new','reviewing','planned','resolved','declined']){const option=node('option',labels[state]);option.value=state;states.append(option);}states.value=r.status;
    card.append(response,states,action(card,'保存回复',async()=>{await api('feedback/'+r.id,'PUT',{response:response.value,status:states.value});el('#message').textContent='已保存，用户可在应用的反馈记录中看到回复。';}));
   }else{
-   const note=node('textarea','');note.placeholder='处理依据（至少两个字），例如：正常交流 / 泄露他人隐私';note.setAttribute('aria-label','处理依据');card.append(note);
+   const note=node('textarea','');note.maxLength=300;note.placeholder='内部处理依据（至少两个字），仅管理员可见';note.setAttribute('aria-label','内部处理依据');const publicReason=node('textarea','');publicReason.maxLength=300;publicReason.placeholder='给作者的说明（可选，最多300字），不要包含举报人信息或隐私';publicReason.setAttribute('aria-label','给作者的说明');card.append(note,publicReason);
    const controls=node('div','');controls.className='actions';
-   for(const decision of currentKind==='queue'?['approve','hide']:['hide'])controls.append(action(card,decision==='approve'?'通过':'隐藏',async()=>{const value=note.value.trim();if(value.length<2)throw Error('请填写至少两个字的处理依据。');await api('moderate','POST',{target_type:r.type,target_id:r.target_id||r.id,decision,note:value});await load(currentKind);}));
+   for(const decision of currentKind==='queue'?['approve','hide']:['hide'])controls.append(action(card,decision==='approve'?'通过':'隐藏',async()=>{const value=note.value.trim();if(value.length<2)throw Error('请填写至少两个字的处理依据。');await api('moderate','POST',{target_type:r.type,target_id:r.target_id||r.id,decision,note:value,public_reason:publicReason.value.trim()});await load(currentKind);}));
    if(currentKind==='reports')controls.append(action(card,'关闭举报',async()=>{if(!confirm('确认关闭这条举报？此操作不会隐藏内容。'))return;await api('reports/'+r.id,'DELETE');await load(currentKind);}));
    card.append(controls);
   }
   el('#list').append(card);
  }
 }
-async function load(kind){
- const ticket=++loadId,currentGeneration=generation;currentKind=kind;rows=[];el('#list').replaceChildren();el('#list').setAttribute('aria-busy','true');el('#message').textContent='正在读取，免费服务器唤醒时可能需要约一分钟…';
- el('#filter-wrap').hidden=kind!=='queue';document.querySelectorAll('[data-kind]').forEach(b=>b.classList.toggle('active',b.dataset.kind===kind));
- try{const data=await api(kind);if(ticket!==loadId||currentGeneration!==generation)return;rows=data;render();}
+async function load(kind,more=false){
+ const ticket=++loadId,currentGeneration=generation;currentKind=kind;if(!more){rows=[];auditCursor=null;auditTarget=el('#audit-target').value.trim();el('#list').replaceChildren();}el('#audit-more').hidden=true;el('#list').setAttribute('aria-busy','true');el('#message').textContent='正在读取，免费服务器唤醒时可能需要约一分钟…';
+ el('#filter-wrap').hidden=kind!=='queue';el('#audit-wrap').hidden=kind!=='audit';document.querySelectorAll('[data-kind]').forEach(b=>b.classList.toggle('active',b.dataset.kind===kind));
+ try{const path=kind==='audit'?'audit?'+new URLSearchParams({target:auditTarget,...(more&&auditCursor?{cursor:auditCursor}:{})}):kind;const data=await api(path);if(ticket!==loadId||currentGeneration!==generation)return;if(kind==='audit'){rows=more?[...rows,...data.records.filter(r=>!rows.some(old=>old.id===r.id))]:data.records;auditCursor=data.next_cursor;el('#audit-more').hidden=!auditCursor;}else rows=data;render();}
  catch(e){if(ticket===loadId&&currentGeneration===generation)el('#message').textContent=e.name==='AbortError'?'连接超时，请再次点击栏目重试。':e.message;}
  finally{if(ticket===loadId&&currentGeneration===generation)el('#list').setAttribute('aria-busy','false');}
 }
-document.querySelectorAll('[data-kind]').forEach(b=>b.onclick=()=>load(b.dataset.kind));el('#filter').onchange=render;
+document.querySelectorAll('[data-kind]').forEach(b=>b.onclick=()=>load(b.dataset.kind));el('#filter').onchange=render;el('#audit-find').onclick=()=>load('audit');el('#audit-more').onclick=()=>load('audit',true);
 </script>
 </body></html>
