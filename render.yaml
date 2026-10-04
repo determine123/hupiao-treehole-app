@@ -1,0 +1,47 @@
+# Free INTERNAL TEST only: Postgres expires after 30 days.
+# Never silently switch any resource to a paid plan.
+services:
+  - type: web
+    name: hupiao-api-beta
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    dockerCommand: python start.py
+    healthCheckPath: /ready
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        fromDatabase: {name: hupiao-db-beta, property: connectionString}
+      - key: REDIS_URL
+        fromService: {type: keyvalue, name: hupiao-rate-beta, property: connectionString}
+      - key: TOKEN_PEPPER
+        generateValue: true
+      - key: ADMIN_TOKEN
+        generateValue: true
+      - key: SUPPORT_EMAIL
+        sync: false
+      - key: MODERATE_BEFORE_PUBLISH
+        value: 'true'
+      - key: WEB_CONCURRENCY
+        value: '1'
+      - key: POOL_SIZE
+        value: '3'
+      - key: MAX_OVERFLOW
+        value: '2'
+  - type: keyvalue
+    name: hupiao-rate-beta
+    plan: free
+    region: singapore
+    maxmemoryPolicy: noeviction
+    ipAllowList: []
+databases:
+  - name: hupiao-db-beta
+    plan: free
+    region: singapore
+    databaseName: hupiao
+    user: hupiao
+    postgresMajorVersion: '17'
+    ipAllowList: []

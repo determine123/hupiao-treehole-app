@@ -1,0 +1,44 @@
+# 沪漂树洞：Android / iOS 与 Python 后端
+
+Expo + React Native 原生客户端，FastAPI + SQLAlchemy + Alembic 后端。参考 [Anonymous](https://github.com/wu-qing-157/Anonymous) 的匿名社区体验，没有复制 Kotlin 源码。现有网页版及数据未被替换。
+
+已实现多话题、搜索、游标分页、草稿、回复引用、点赞、个人互动列表、安全存储匿名凭证、先审后发、举报、屏蔽、身份删除及私密内测反馈。管理员通过 `/admin` 审核内容、处理举报和答复反馈。
+
+## 本机运行
+
+在工程目录：
+
+```powershell
+python -m venv .venv
+.venv/Scripts/python.exe -m pip install -r backend/requirements.lock.txt
+./scripts/start-backend.ps1
+```
+
+API 文档：`http://127.0.0.1:8000/docs`。管理员页面：`http://127.0.0.1:8000/admin`。在 `backend/.env` 设置自己的随机 `ADMIN_TOKEN` 后重启才能管理；密钥不能提交 GitHub。
+
+另开终端：
+
+```powershell
+cd mobile
+npm ci
+Copy-Item .env.example .env
+npm start
+```
+
+手机上的 localhost 指向手机自己。局域网内测需将 `EXPO_PUBLIC_API_URL` 改为电脑 IP，后端显式以 `--host 0.0.0.0` 启动，仅对受信任测试网络开放；正式版使用真实 HTTPS 域名。使用与 SDK 57 对应的开发构建验证客户端。
+
+## 检查
+
+```powershell
+cd backend
+../.venv/Scripts/python.exe -m pytest tests -q
+../.venv/Scripts/python.exe -m ruff check app tests --select F
+cd ../mobile
+npm run typecheck
+npm run lint
+npm run export:mobile
+```
+
+[发布步骤](docs/RELEASE.md) · [内测流程](docs/BETA.md) · [数据与性能说明](docs/ARCHITECTURE.md)
+
+当前未生成签名 APK/IPA、未部署正式 Python 服务器、未提交商店。JS 资源导出不等于原生安装包。正式发布还需要服务器、联系邮箱、开发者账号、真机测试及清理已知依赖漏洞。
