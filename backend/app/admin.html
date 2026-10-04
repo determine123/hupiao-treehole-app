@@ -42,12 +42,13 @@ function render(){
   const card=node('section','');card.append(node('span',labels[r.type]||'内测反馈'));card.append(node('h3',r.title||r.parent_title||r.kind||'匿名回复'));
   if(r.category)card.append(node('span',r.category));
   if(r.created)card.append(node('p',new Date(r.created).toLocaleString('zh-CN')));
-  if(r.type==='comment'&&currentKind==='queue'){
+  if(currentKind==='reports')card.append(node('p','内容状态：'+(labels[r.status]||r.status||'未知')));
+  if(r.type==='comment'&&(currentKind==='queue'||currentKind==='reports')){
    const context=node('details','');context.className='context';context.append(node('summary','原帖上下文 · '+(labels[r.parent_status]||r.parent_status)));
    context.append(node('strong',r.parent_title),node('pre',r.parent_excerpt||'暂无原帖摘要'),node('small','原帖摘要最多展示 500 字；原帖编号：'+r.post));card.append(context);
   }
   if(currentKind==='audit'){card.replaceChildren(node('h3',(labels[r.target_type]||r.target_type)+' · '+(labels[r.decision]||r.decision)),node('p',new Date(r.created).toLocaleString('zh-CN')),node('small','内容编号：'+r.target_id),node('p','给作者的说明：'+(r.reason||'未填写')),node('pre','内部记录：'+r.note));el('#list').append(card);continue;}
-  card.append(node('pre',r.body),node('small','编号：'+r.id));
+  card.append(node('pre',r.body),node('small',currentKind==='reports'?'举报编号：'+r.id+' · 内容编号：'+r.target_id:'编号：'+r.id));
   if(r.reason)card.append(node('p','举报原因：'+r.reason));
   if(currentKind==='feedback'){
    card.append(node('p','设备：'+r.device+' / 版本：'+r.app_version));

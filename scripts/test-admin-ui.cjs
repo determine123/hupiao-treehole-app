@@ -41,7 +41,19 @@ async function run(){
  assert.equal(new URL(pending[4].url,'https://example.test').searchParams.get('target'),'a'.repeat(36));
  finish(pending[4],{records:[{id:'audit-2',target_id:'a'.repeat(36),target_type:'post',decision:'approve',reason:'',note:'Reviewed',created:0}],next_cursor:null});
  await more;assert.equal(elements.list.children.length,2);assert.equal(elements['audit-more'].hidden,true);
+ const reports=context.load('reports');
+ finish(pending[5],[{id:'report-id',type:'comment',target_id:'comment-id',body:'Reported reply',reason:'Review context',status:'active',post:'parent-id',parent_title:'Parent title',parent_status:'hidden',parent_excerpt:'<img src=x onerror=alert(1)>'}]);
+ await reports;
+ const reportCard=elements.list.children[0];
+ assert.ok(reportCard.querySelectorAll('details').length===1);
+ const contents=node=>[node.textContent,...node.children.flatMap(contents)];
+ const reportText=contents(reportCard).join(' ');
+ assert.match(reportText,/Parent title/);assert.match(reportText,/内容状态：已公开/);
+ assert.match(reportText,/原帖上下文 · 已隐藏/);
+ assert.match(reportText,/举报编号：report-id · 内容编号：comment-id/);
+ assert.match(reportText,/<img src=x onerror=alert\(1\)>/);
+ assert.equal(reportCard.querySelectorAll('img').length,0); // User text stays literal, never HTML.
  elements.logout.onclick();assert.equal(elements.list.children.length,0);
- console.log('Admin UI: logout cancels requests; late responses and stale tabs stay hidden.');
+ console.log('Admin UI: delayed responses, audit pagination and report context rendering verified.');
 }
 run().catch(error=>{console.error(error);process.exitCode=1;});

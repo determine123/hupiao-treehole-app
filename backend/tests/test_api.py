@@ -4,6 +4,83 @@ from app.models import Post, User, Report, Comment
 from sqlalchemy import select, event, text
 
 
+def test_report_queue_batches_targets_and_includes_private_parent_context(client):
+    a, b, reporter = user(client), user(client), user(client)
+    p = post(client, a)
+    approve(client, "post", p["id"])
+    for _ in range(8):
+        response = client.post(
+            "/posts/" + p["id"] + "/comments",
+            headers=b,
+            json={"body": "结合原帖判断的被举报回复"},
+        )
+        assert response.status_code == 201
+        cid = response.json()["id"]
+        approve(client, "comment", cid)
+        assert (
+            client.post(
+                "/reports",
+                headers=reporter,
+                json={
+                    "target_type": "comment",
+                    "target_id": cid,
+                    "reason": "请结合上下文检查",
+                },
+            ).status_code
+            == 201
+        )
+    assert (
+        client.post(
+            "/reports",
+            headers=reporter,
+            json={"target_type": "post", "target_id": p["id"], "reason": "检查原帖"},
+        ).status_code
+        == 201
+    )
+    with Session() as session:
+        session.get(Post, p["id"]).body = "长" * 1500
+        session.commit()
+    assert client.get("/admin/reports", headers=reporter).status_code == 403
+    queries = []
+
+    def capture(connection, cursor, statement, parameters, context, many):
+        if statement.lstrip().upper().startswith("SELECT"):
+            queries.append(statement)
+
+    event.listen(engine, "before_cursor_execute", capture)
+    try:
+        response = client.get("/admin/reports", headers=ADMIN)
+        assert response.status_code == 200
+        queue = response.json()
+    finally:
+        event.remove(engine, "before_cursor_execute", capture)
+    assert len(queue) == 9
+    assert len(queries) <= 3, queries
+    for row in queue:
+        assert row["status"] == "active"
+        assert "owner" not in row and "secret_hash" not in row
+        if row["type"] == "comment":
+            assert row["parent_title"] == p["title"]
+            assert row["post"] == p["id"]
+            assert row["parent_status"] == "active"
+            assert row["parent_excerpt"] == "长" * 500
+        else:
+            assert row["title"] == p["title"]
+    client.post(
+        "/admin/moderate",
+        headers=ADMIN,
+        json={
+            "target_type": "post",
+            "target_id": p["id"],
+            "decision": "hide",
+            "note": "隐藏原帖后仍可核对回复",
+        },
+    )
+    queue = client.get("/admin/reports", headers=ADMIN).json()
+    assert len(queue) == 8
+    assert all(row["parent_status"] == "hidden" for row in queue)
+
+
 def test_stale_duplicate_comment_deletion_does_not_remove_another_reply_count(client):
     from app.main import delete_comment
     from fastapi import HTTPException

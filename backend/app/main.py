@@ -763,8 +763,7 @@ def moderate(b: ModerateInput, session=Depends(database)):
 
 @app.get("/admin/reports", dependencies=[Depends(admin)])
 def reports(session=Depends(database)):
-    result = []
-    for r in session.scalars(
+    rows = session.scalars(
         select(Report)
         .where(
             Report.status == "open",
@@ -779,18 +778,59 @@ def reports(session=Depends(database)):
                 ),
             ),
         )
-        .order_by(Report.created)
+        .order_by(Report.created, Report.id)
         .limit(100)
-    ):
-        target = session.get(Post if r.target_type == "post" else Comment, r.target_id)
+    ).all()
+    comment_ids = {r.target_id for r in rows if r.target_type == "comment"}
+    comments = (
+        {
+            c.id: c
+            for c in session.scalars(select(Comment).where(Comment.id.in_(comment_ids)))
+        }
+        if comment_ids
+        else {}
+    )
+    post_ids = {r.target_id for r in rows if r.target_type == "post"} | {
+        c.post for c in comments.values()
+    }
+    posts = (
+        {p.id: p for p in session.scalars(select(Post).where(Post.id.in_(post_ids)))}
+        if post_ids
+        else {}
+    )
+    result = []
+    for r in rows:
+        target = (
+            posts.get(r.target_id)
+            if r.target_type == "post"
+            else comments.get(r.target_id)
+        )
+        # Content may disappear between the queue read and the batched target reads.
+        if target is None:
+            continue
+        context = {}
+        if r.target_type == "comment":
+            parent = posts.get(target.post)
+            if parent is None:
+                continue
+            context = {
+                "post": parent.id,
+                "parent_title": parent.title,
+                "parent_status": parent.status,
+                "parent_excerpt": parent.body[:500],
+            }
+        else:
+            context = {"title": target.title, "category": target.category}
         result.append(
             {
                 "id": r.id,
                 "type": r.target_type,
                 "target_id": r.target_id,
                 "reason": r.reason,
-                "body": target.body if target else "内容已删除",
+                "body": target.body,
+                "status": target.status,
                 "created": r.created,
+                **context,
             }
         )
     return result
