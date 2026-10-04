@@ -547,6 +547,16 @@ def queue(session=Depends(database)):
         .order_by(Comment.created)
         .limit(100)
     ).all()
+    parents = (
+        {
+            p.id: p
+            for p in session.scalars(
+                select(Post).where(Post.id.in_({c.post for c in comments}))
+            ).all()
+        }
+        if comments
+        else {}
+    )
     return [
         {
             "type": "post",
@@ -562,6 +572,11 @@ def queue(session=Depends(database)):
             "type": "comment",
             "id": c.id,
             "post": c.post,
+            "parent_title": parents[c.post].title
+            if c.post in parents
+            else "原帖已删除",
+            "parent_status": parents[c.post].status if c.post in parents else "deleted",
+            "parent_excerpt": parents[c.post].body[:500] if c.post in parents else "",
             "body": c.body,
             "created": c.created,
         }

@@ -1,3 +1,76 @@
-<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>沪漂树洞内容管理</title><style>body{max-width:850px;margin:35px auto;padding:20px;font:16px/1.7 system-ui;background:#122019;color:#e1eee5}input,button,textarea{font:inherit;padding:9px;border-radius:6px}section{border:1px solid #54715d;padding:18px;margin:15px 0;border-radius:10px}button{cursor:pointer}pre{white-space:pre-wrap}label{display:block}#message{color:#ffd6ac}</style><h1>沪漂树洞内容管理</h1><p>密钥只保存在当前页面内存中。逐条阅读后决定，反馈回复会显示在内测用户的应用里。</p><label>管理员密钥 <input id="key" type="password" autocomplete="off"></label><p><button onclick="load('queue')">待审核</button> <button onclick="load('reports')">举报</button> <button onclick="load('feedback')">内测反馈</button> <button onclick="document.querySelector('#key').value='';document.querySelector('#list').replaceChildren()">退出</button></p><p id="message" role="status"></p><main id="list"></main><script>
-const el=s=>document.querySelector(s);async function api(path,method='GET',body){const response=await fetch('/admin/'+path,{method,headers:{'X-Admin-Token':el('#key').value,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});const d=await response.json();if(!response.ok)throw Error(typeof d.detail==='string'?d.detail:'操作失败');return d;}function node(tag,text){const n=document.createElement(tag);n.textContent=text;return n;}async function load(kind){try{const rows=await api(kind);el('#list').replaceChildren();el('#message').textContent=rows.length+' 条记录';for(const r of rows){const card=node('section','');card.append(node('h3',r.title||r.kind||r.type),node('pre',r.body),node('small',r.id));if(r.reason)card.append(node('p','举报原因：'+r.reason));if(kind==='feedback'){card.append(node('p','设备：'+r.device+' / 版本：'+r.app_version));const response=node('textarea','');response.value=r.response;response.placeholder='回复测试者';card.append(response);const states=document.createElement('select');for(const state of ['new','reviewing','planned','resolved','declined']){const option=node('option',state);option.value=state;states.append(option);}states.value=r.status;card.append(states);const save=node('button','保存回复');save.onclick=async()=>{try{await api('feedback/'+r.id,'PUT',{response:response.value,status:states.value});el('#message').textContent='已保存';}catch(e){el('#message').textContent=e.message}};card.append(save);}else{for(const decision of kind==='queue'?['approve','hide']:['hide']){const b=node('button',decision==='approve'?'通过':'隐藏');b.onclick=async()=>{const note=prompt('处理依据（至少两个字）');if(!note||note.trim().length<2)return;try{await api('moderate','POST',{target_type:r.type,target_id:r.target_id||r.id,decision,note});await load(kind);}catch(e){el('#message').textContent=e.message}};card.append(b);}}if(kind==='reports'){const dismiss=node('button','关闭举报');dismiss.onclick=async()=>{try{await api('reports/'+r.id,'DELETE');await load(kind);}catch(e){el('#message').textContent=e.message}};card.append(dismiss);}el('#list').append(card);}}catch(e){el('#message').textContent=e.message}}
-</script></html>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>沪漂树洞内容管理</title>
+<style>
+body{max-width:900px;margin:24px auto;padding:20px;font:16px/1.7 system-ui;background:#122019;color:#e1eee5}input,button,textarea,select{font:inherit;padding:9px;border-radius:8px;box-sizing:border-box}input,textarea,select{background:#1b2c22;color:#e1eee5;border:1px solid #54715d}textarea{width:100%;min-height:85px}section{border:1px solid #54715d;padding:18px;margin:15px 0;border-radius:12px}button{cursor:pointer;border:1px solid #54715d;background:#d2e6d7;color:#122019}button:disabled{opacity:.5;cursor:wait}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}label{display:block}nav,.actions{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0}.muted,small{color:#b0c4b5}#message{color:#ffd6ac}.context{border-left:3px solid #8bb79a;padding-left:12px;margin:12px 0}.tag{border:1px solid #54715d;padding:2px 8px;border-radius:20px;font-size:13px}.active{background:#8bb79a}#key{width:min(100%,500px)}h1{margin-bottom:6px}h3{margin:8px 0}
+</style>
+</head>
+<body>
+<h1>沪漂树洞 · 内容管理</h1>
+<p class="muted">逐条阅读后决定。密钥只保存在当前页面内存，刷新或退出后需要重新输入。</p>
+<label for="key">管理员密钥</label><input id="key" type="password" autocomplete="off" spellcheck="false">
+<nav aria-label="管理栏目"><button data-kind="queue">待审核</button><button data-kind="reports">举报</button><button data-kind="feedback">内测反馈</button><button id="logout">退出并清空</button></nav>
+<label id="filter-wrap" hidden>审核类型 <select id="filter"><option value="all">全部</option><option value="post">帖子</option><option value="comment">回复</option></select></label>
+<p id="message" role="status" aria-live="polite"></p><main id="list" aria-busy="false"></main>
+<script>
+const el=s=>document.querySelector(s);
+const labels={post:'帖子',comment:'回复',pending:'待审核',active:'已公开',hidden:'已隐藏',deleted:'已删除',new:'新反馈',reviewing:'处理中',planned:'已计划',resolved:'已解决',declined:'暂不采纳'};
+let generation=0,loadId=0,currentKind='queue',rows=[];
+const requests=new Set();
+function invalidate(clearKey){generation++;loadId++;for(const c of requests)c.abort();requests.clear();rows=[];el('#list').replaceChildren();el('#list').setAttribute('aria-busy','false');if(clearKey)el('#key').value='';el('#message').textContent=clearKey?'已退出，页面内容与密钥已清空。':'密钥已更改，请选择管理栏目。';}
+el('#logout').onclick=()=>invalidate(true);
+el('#key').addEventListener('input',()=>invalidate(false));
+async function api(path,method='GET',body){
+ const key=el('#key').value.trim();if(!key)throw Error('请先粘贴管理员密钥。');
+ const ticket=generation,controller=new AbortController();requests.add(controller);
+ const timer=setTimeout(()=>controller.abort(),90000);
+ try{
+  const response=await fetch('/admin/'+path,{method,cache:'no-store',signal:controller.signal,headers:{'X-Admin-Token':key,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
+  const data=await response.json();if(ticket!==generation)throw Error('会话已退出或密钥已更改。');
+  if(!response.ok)throw Error(response.status===403?'管理员密钥无效，请重新输入。':typeof data.detail==='string'?data.detail:'操作失败，请稍后重试。');
+  return data;
+ }finally{clearTimeout(timer);requests.delete(controller);}
+}
+function node(tag,text){const n=document.createElement(tag);n.textContent=text;return n;}
+function summary(){const shown=currentKind==='queue'&&el('#filter').value!=='all'?rows.filter(r=>r.type===el('#filter').value):rows;el('#message').textContent=rows.length?'显示 '+shown.length+' / '+rows.length+' 条记录'+(currentKind==='queue'?'（每次最多读取 100 条帖子和 100 条回复）':''):'当前没有'+(currentKind==='queue'?'待审核内容':currentKind==='reports'?'待处理举报':'内测反馈')+'。';return shown;}
+function action(card,text,fn){const button=node('button',text);button.type='button';button.onclick=async()=>{const ticket=generation;const buttons=card.querySelectorAll('button');buttons.forEach(b=>b.disabled=true);try{await fn();}catch(e){if(ticket===generation)el('#message').textContent=e.name==='AbortError'?'请求超时，请刷新列表确认处理结果后再重试。':e.message;}finally{if(ticket===generation)buttons.forEach(b=>b.disabled=false);}};return button;}
+function render(){
+ el('#list').replaceChildren();const shown=summary();
+ for(const r of shown){
+  const card=node('section','');card.append(node('span',labels[r.type]||'内测反馈'));card.append(node('h3',r.title||r.parent_title||r.kind||'匿名回复'));
+  if(r.category)card.append(node('span',r.category));
+  if(r.created)card.append(node('p',new Date(r.created).toLocaleString('zh-CN')));
+  if(r.type==='comment'&&currentKind==='queue'){
+   const context=node('details','');context.className='context';context.append(node('summary','原帖上下文 · '+(labels[r.parent_status]||r.parent_status)));
+   context.append(node('strong',r.parent_title),node('pre',r.parent_excerpt||'暂无原帖摘要'),node('small','原帖摘要最多展示 500 字；原帖编号：'+r.post));card.append(context);
+  }
+  card.append(node('pre',r.body),node('small','编号：'+r.id));
+  if(r.reason)card.append(node('p','举报原因：'+r.reason));
+  if(currentKind==='feedback'){
+   card.append(node('p','设备：'+r.device+' / 版本：'+r.app_version));
+   const response=node('textarea','');response.value=r.response||'';response.placeholder='回复测试者';response.setAttribute('aria-label','反馈回复');
+   const states=document.createElement('select');states.setAttribute('aria-label','反馈处理状态');
+   for(const state of ['new','reviewing','planned','resolved','declined']){const option=node('option',labels[state]);option.value=state;states.append(option);}states.value=r.status;
+   card.append(response,states,action(card,'保存回复',async()=>{await api('feedback/'+r.id,'PUT',{response:response.value,status:states.value});el('#message').textContent='已保存，用户可在应用的反馈记录中看到回复。';}));
+  }else{
+   const note=node('textarea','');note.placeholder='处理依据（至少两个字），例如：正常交流 / 泄露他人隐私';note.setAttribute('aria-label','处理依据');card.append(note);
+   const controls=node('div','');controls.className='actions';
+   for(const decision of currentKind==='queue'?['approve','hide']:['hide'])controls.append(action(card,decision==='approve'?'通过':'隐藏',async()=>{const value=note.value.trim();if(value.length<2)throw Error('请填写至少两个字的处理依据。');await api('moderate','POST',{target_type:r.type,target_id:r.target_id||r.id,decision,note:value});await load(currentKind);}));
+   if(currentKind==='reports')controls.append(action(card,'关闭举报',async()=>{if(!confirm('确认关闭这条举报？此操作不会隐藏内容。'))return;await api('reports/'+r.id,'DELETE');await load(currentKind);}));
+   card.append(controls);
+  }
+  el('#list').append(card);
+ }
+}
+async function load(kind){
+ const ticket=++loadId,currentGeneration=generation;currentKind=kind;rows=[];el('#list').replaceChildren();el('#list').setAttribute('aria-busy','true');el('#message').textContent='正在读取，免费服务器唤醒时可能需要约一分钟…';
+ el('#filter-wrap').hidden=kind!=='queue';document.querySelectorAll('[data-kind]').forEach(b=>b.classList.toggle('active',b.dataset.kind===kind));
+ try{const data=await api(kind);if(ticket!==loadId||currentGeneration!==generation)return;rows=data;render();}
+ catch(e){if(ticket===loadId&&currentGeneration===generation)el('#message').textContent=e.name==='AbortError'?'连接超时，请再次点击栏目重试。':e.message;}
+ finally{if(ticket===loadId&&currentGeneration===generation)el('#list').setAttribute('aria-busy','false');}
+}
+document.querySelectorAll('[data-kind]').forEach(b=>b.onclick=()=>load(b.dataset.kind));el('#filter').onchange=render;
+</script>
+</body></html>

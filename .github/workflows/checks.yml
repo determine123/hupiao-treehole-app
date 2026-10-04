@@ -23,6 +23,7 @@ jobs:
         working-directory: backend
       - run: python -m ruff check app tests --select F
         working-directory: backend
+      - run: node scripts/test-admin-ui.cjs
   mobile:
     runs-on: ubuntu-latest
     steps:

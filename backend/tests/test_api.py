@@ -225,3 +225,27 @@ def test_discovery_sorting_and_visibility(client):
         p["id"] for p in client.get("/posts?sort=hot", headers=b).json()["posts"]
     ] == [ids[1], ids[3]]
 
+
+def test_review_queue_includes_parent_context_only_for_admin(client):
+    a = user(client)
+    p = post(client, a)
+    approve(client, "post", p["id"])
+    r = client.post(
+        "/posts/" + p["id"] + "/comments",
+        headers=a,
+        json={"body": "需要结合原帖判断的回复"},
+    )
+    assert r.status_code == 201
+    assert client.get("/admin/queue", headers=a).status_code == 403
+    queue = client.get("/admin/queue", headers=ADMIN).json()
+    comment = next(x for x in queue if x["id"] == r.json()["id"])
+    assert comment["parent_title"] == p["title"]
+    assert comment["parent_status"] == "active"
+    assert comment["parent_excerpt"] == p["body"][:500]
+    assert "owner" not in comment and "secret_hash" not in comment
+    with Session() as session:
+        parent = session.get(Post, p["id"])
+        parent.body = "长" * 1500
+        session.commit()
+    comment = client.get("/admin/queue", headers=ADMIN).json()[0]
+    assert len(comment["parent_excerpt"]) == 500
