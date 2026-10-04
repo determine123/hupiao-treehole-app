@@ -344,16 +344,17 @@ def like(id: str, b: Vote, user=Depends(identity), session=Depends(database)):
             conflict_insert(Like, session)
             .values(post=id, owner=user.id)
             .on_conflict_do_nothing(index_elements=[Like.post, Like.owner])
+            .returning(Like.post)
         )
-        if result.rowcount:
+        if result.scalar_one_or_none() is not None:
             session.execute(
                 update(Post).where(Post.id == id).values(likes=Post.likes + 1)
             )
     else:
         result = session.execute(
-            delete(Like).where(Like.post == id, Like.owner == user.id)
+            delete(Like).where(Like.post == id, Like.owner == user.id).returning(Like.post)
         )
-        if result.rowcount:
+        if result.scalar_one_or_none() is not None:
             session.execute(
                 update(Post)
                 .where(Post.id == id)

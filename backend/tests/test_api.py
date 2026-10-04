@@ -69,7 +69,8 @@ def test_votes_blocks_reports(client):
     client.delete("/blocks/" + block, headers=a)
     assert len(client.get("/blocks", headers=b).json()) == 1
     client.delete("/blocks/" + block, headers=b)
-    assert client.put(path, headers=b, json={"liked": False}).json()["likes"] == 0
+    for _ in range(2):
+        assert client.put(path, headers=b, json={"liked": False}).json()["likes"] == 0
 
 
 def test_feedback_loop_and_identity_deletion(client):
