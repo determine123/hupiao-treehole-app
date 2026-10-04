@@ -193,7 +193,7 @@ def test_validation_and_rate_limit(client):
 def test_discovery_sorting_and_visibility(client):
     from app.models import now
 
-    a, b = user(client), user(client)
+    b = user(client)
     ids = [post(client, user(client))["id"] for _ in range(5)]
     for pid in ids[:4]:
         approve(client, "post", pid)
@@ -224,3 +224,4 @@ def test_discovery_sorting_and_visibility(client):
     assert [
         p["id"] for p in client.get("/posts?sort=hot", headers=b).json()["posts"]
     ] == [ids[1], ids[3]]
+
