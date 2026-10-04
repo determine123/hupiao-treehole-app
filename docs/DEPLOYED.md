@@ -21,3 +21,5 @@
 2026-10-04 1.0.1：广场排序后端已上线，公网 latest / hot / unanswered 与临时身份删除验证通过；PostgreSQL CI 通过。安卓构建成功，实际 APK 包名与新旧签名证书一致，versionCode 升到 2，新功能和 HTTPS 地址已在安装包中核对。GitHub 公共下载通过范围请求验证。详见 android-artifact-1.0.1.json 与 DOWNLOAD.md。
 
 审核后台改进：原帖上下文、类型筛选与中文反馈状态已实现，退出和快速切换栏目的迟到响应回归验证通过；此次只更新 Python 服务，APK 1.0.1 可继续使用。已于 2026-10-04 部署上线（dep-db12ft2d0e5s73dpou00），HTTPS 页面与禁止缓存响应头核对通过；CI 37194941615 通过。
+
+2026-10-04 1.0.2：Alembic b39a807de214 已在真实 PostgreSQL 部署升级，dep-db13mie0tbcc739c018g 为 live。CI 37199428279 验证 15 项后端测试（含独立 PostgreSQL schema 内的旧数据迁移）和双平台导出。公网验证作者说明、内部依据隔离、管理员权限和删除后的记录不可见；临时身份与内容已清理。安卓 versionCode 3 签名构建成功，新旧证书一致，GitHub 公开下载已验证；尚未完成完整真机测试。详见 android-artifact-1.0.2.json。

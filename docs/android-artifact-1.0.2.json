@@ -1,0 +1,25 @@
+{
+  "signingCertificateSha256": "6337c50201233bc5ded0fbc574c1e98f9cd29a254c9d56d85eb058b3e0271ae0",
+  "sameSignerAsPreviousApk": true,
+  "buildId": "bba0b292-d209-407e-83b1-d5653d0a813e",
+  "sourceCommit": "4d482827c0c5409b76f833b7708512e84f9979cb",
+  "version": "1.0.2",
+  "versionCode": 3,
+  "package": "com.determine123.hupiao",
+  "filename": "hupiao-treehole-1.0.2-beta.1.apk",
+  "sha256": "f83c0346459990224d6324be6ef3268fb826c068390500588586a12780433536",
+  "bytes": 97315909,
+  "expoDownloadUrl": "https://expo.dev/artifacts/eas/LafvCZHwxdZnGMImN0kTBbtr1rBAAng6qxumUyRYRiI.apk",
+  "androidArchitectures": [
+    "arm64-v8a",
+    "armeabi-v7a",
+    "x86",
+    "x86_64"
+  ],
+  "embeddedApiVerified": true,
+  "signingBlockPresent": true,
+  "downloadUrl": "https://github.com/determine123/hupiao-treehole-app/releases/download/v1.0.2-beta.1/hupiao-treehole-1.0.2-beta.1.apk",
+  "releaseUrl": "https://github.com/determine123/hupiao-treehole-app/releases/tag/v1.0.2-beta.1",
+  "githubDigest": "sha256:f83c0346459990224d6324be6ef3268fb826c068390500588586a12780433536",
+  "cloudPublishingWorkflow": "https://github.com/determine123/hupiao-treehole-app/actions/runs/37200397269"
+}
