@@ -1,0 +1,38 @@
+name: Publish verified Android APK
+on:
+  workflow_dispatch:
+    inputs:
+      apk_url:
+        description: Public EAS APK download URL
+        required: true
+        type: string
+      sha256:
+        description: Expected SHA-256 from the verified build
+        required: true
+        type: string
+permissions:
+  contents: write
+concurrency:
+  group: publish-android-beta
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      APK_URL: ${{ inputs.apk_url }}
+      APK_SHA256: ${{ inputs.sha256 }}
+      APK_NAME: hupiao-treehole-1.0.0-beta.1.apk
+      RELEASE_TAG: v1.0.0-beta.1
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Download and verify APK
+        run: |
+          case "$APK_URL" in https://expo.dev/artifacts/eas/*.apk) ;; *) echo 'Unexpected artifact host'; exit 1 ;; esac
+          curl --fail --location --retry 3 "$APK_URL" --output "$APK_NAME"
+          printf '%s  %s\n' "$APK_SHA256" "$APK_NAME" > "$APK_NAME.sha256"
+          sha256sum --check "$APK_NAME.sha256"
+          unzip -t "$APK_NAME" > /dev/null
+      - name: Publish to beta release
+        run: gh release upload "$RELEASE_TAG" "$APK_NAME" "$APK_NAME.sha256" --clobber
