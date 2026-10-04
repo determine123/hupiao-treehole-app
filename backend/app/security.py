@@ -62,27 +62,31 @@ def conflict_insert(table, session):
 
 
 def rate(session, key, limit=30, seconds=600):
-    bucket = int(time.time()) // seconds
+    now = int(time.time())
+    bucket = now // seconds
+    reset_at = (bucket + 1) * seconds
     key = digest(key) + ":" + str(bucket)
     if redis:
         script = "local n=redis.call('INCR',KEYS[1]); if n==1 then redis.call('EXPIRE',KEYS[1],ARGV[1]) end; return n"
         try:
-            count = redis.eval(script, 1, "rate:" + key, seconds + 1)
+            count = redis.eval(script, 1, "rate:" + key, reset_at - now + 1)
         except RedisError:
             raise HTTPException(503, "服务暂时繁忙，请稍后重试")
     else:
         statement = conflict_insert(RateBucket, session).values(
-            key=key, count=1, expires=int(time.time()) + seconds
+            key=key, count=1, expires=reset_at
         )
         statement = statement.on_conflict_do_update(
             index_elements=[RateBucket.key], set_={"count": RateBucket.count + 1}
         ).returning(RateBucket.count)
         count = session.scalar(statement)
-        session.execute(delete(RateBucket).where(RateBucket.expires < int(time.time())))
+        session.execute(delete(RateBucket).where(RateBucket.expires <= now))
         session.commit()
     if count > limit:
         raise HTTPException(
-            429, "操作过于频繁，请稍后再试", headers={"Retry-After": str(seconds)}
+            429,
+            "操作过于频繁，请稍后再试",
+            headers={"Retry-After": str(max(1, reset_at - int(time.time())))},
         )
 
 
