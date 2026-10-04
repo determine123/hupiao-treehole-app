@@ -414,17 +414,22 @@ def delete_post(id: str, user=Depends(identity), session=Depends(database)):
 
 @app.delete("/comments/{id}")
 def delete_comment(id: str, user=Depends(identity), session=Depends(database)):
-    c = session.get(Comment, id)
-    if not c or c.owner != user.id:
+    # DELETE locks the row and returns the actual removed state, not a stale ORM read.
+    removed = session.execute(
+        delete(Comment)
+        .where(Comment.id == id, Comment.owner == user.id)
+        .returning(Comment.post, Comment.status)
+        .execution_options(synchronize_session=False)
+    ).one_or_none()
+    if removed is None:
         raise HTTPException(404, "无法删除这条回复")
     resolve_removed_reports(session, [], [id])
-    if c.status == "active":
+    if removed.status == "active":
         session.execute(
             update(Post)
-            .where(Post.id == c.post)
+            .where(Post.id == removed.post)
             .values(replies=case((Post.replies > 0, Post.replies - 1), else_=0))
         )
-    session.delete(c)
     session.commit()
     return {"ok": True}
 

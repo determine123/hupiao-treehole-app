@@ -4,6 +4,63 @@ from app.models import Post, User, Report, Comment
 from sqlalchemy import select, event, text
 
 
+def test_stale_duplicate_comment_deletion_does_not_remove_another_reply_count(client):
+    from app.main import delete_comment
+    from fastapi import HTTPException
+    import pytest
+    from types import SimpleNamespace
+
+    a, b = user(client), user(client)
+    p = post(client, a)
+    approve(client, "post", p["id"])
+    replies = []
+    for _ in range(2):
+        response = client.post(
+            "/posts/" + p["id"] + "/comments",
+            headers=b,
+            json={"body": "并发删除计数回归测试"},
+        )
+        assert response.status_code == 201
+        replies.append(response.json())
+        approve(client, "comment", replies[-1]["id"])
+    with Session() as first, Session() as second:
+        # Both requests already read the same row before the first one commits.
+        earlier = first.get(Comment, replies[0]["id"])
+        stale = second.get(Comment, replies[0]["id"])
+        author = SimpleNamespace(id=earlier.owner)
+        assert stale.status == "active"
+        assert delete_comment(earlier.id, author, first) == {"ok": True}
+        with pytest.raises(HTTPException) as error:
+            delete_comment(stale.id, author, second)
+        assert error.value.status_code == 404
+    assert client.get("/posts/" + p["id"], headers=a).json()["post"]["replies"] == 1
+
+
+def test_comment_deletion_uses_current_status_after_moderation(client):
+    from app.main import delete_comment
+    from types import SimpleNamespace
+
+    a, b = user(client), user(client)
+    p = post(client, a)
+    approve(client, "post", p["id"])
+    response = client.post(
+        "/posts/" + p["id"] + "/comments",
+        headers=b,
+        json={"body": "审核和删除交错执行回归测试"},
+    )
+    assert response.status_code == 201
+    cid = response.json()["id"]
+    with Session() as deletion:
+        stale = deletion.get(Comment, cid)
+        assert stale.status == "pending"
+        approve(client, "comment", cid)
+        assert client.get("/posts/" + p["id"], headers=a).json()["post"]["replies"] == 1
+        assert delete_comment(cid, SimpleNamespace(id=stale.owner), deletion) == {
+            "ok": True
+        }
+    assert client.get("/posts/" + p["id"], headers=a).json()["post"]["replies"] == 0
+
+
 def test_deleted_content_reports_leave_queue_without_closing_unrelated_reports(client):
     a, b, reporter = user(client), user(client), user(client)
     p, retained = post(client, a), post(client, b)
