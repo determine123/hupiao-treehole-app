@@ -46,6 +46,7 @@ if settings.cors_origins:
 
 @app.middleware("http")
 async def bounded_requests(request: Request, call_next):
+    started = time.perf_counter()
     if request.method in {"POST", "PUT", "PATCH"}:
         size = 0
         parts = []
@@ -54,11 +55,15 @@ async def bounded_requests(request: Request, call_next):
             if size > 32768:
                 from fastapi.responses import JSONResponse
 
-                return JSONResponse({"detail": "请求内容过长"}, status_code=413)
+                response = JSONResponse({"detail": "请求内容过长"}, status_code=413)
+                return add_response_headers(response, started)
             parts.append(part)
         request._body = b"".join(parts)
-    started = time.perf_counter()
     response = await call_next(request)
+    return add_response_headers(response, started)
+
+
+def add_response_headers(response, started):
     response.headers["X-Request-ID"] = str(uuid.uuid4())
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Cache-Control"] = "no-store"

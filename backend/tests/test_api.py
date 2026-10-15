@@ -4,6 +4,18 @@ from app.models import Post, User, Report, Comment, Feedback
 from sqlalchemy import select, event, text
 
 
+def test_normal_and_oversized_responses_share_security_headers(client):
+    for response in [
+        client.get("/health"),
+        client.post("/session", content=b"x" * 32769),
+    ]:
+        assert response.headers["x-request-id"]
+        assert response.headers["x-content-type-options"] == "nosniff"
+        assert response.headers["cache-control"] == "no-store"
+        assert response.headers["server-timing"].startswith("app;dur=")
+    assert response.status_code == 413
+
+
 def test_admin_feedback_pages_reach_old_issues_and_filter_without_duplicates(client):
     a = user(client)
     with Session() as session:
