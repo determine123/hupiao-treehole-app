@@ -23,6 +23,23 @@ npx eas-cli@latest build --platform ios --profile production
 
 Android preview 生成内部测试 APK；ios-simulator 仅供模拟器，不能安装到普通 iPhone。iOS 真机内测使用签名构建通过 TestFlight 分发，或配置 Ad Hoc 并注册设备。确认包名 `com.determine123.hupiao`、EAS projectId、隐私政策 URL、截图、客服联系方式和审核说明后，再提交商店。
 
+## 前端 OTA 更新
+
+EAS Update 只分发 JavaScript、样式和静态资源。Python 后端仍需单独部署；原生依赖、权限、包名或 Expo SDK 改动必须重新构建并安装 APK/IPA。当前配置使用 `appVersion` 作为运行时版本，只有运行时版本相同的平台安装包会接收对应更新。
+
+预览 APK 使用 `preview` channel，正式包使用 `production` channel。首次启用或升级 `expo-updates` 后，先分别为需要测试的平台构建并安装新包；之前发布的 1.0.2 安装包没有这次加入的原生更新模块，不能接收 OTA。
+
+每次发布 OTA 前，在 Expo 项目 `preview` 环境设置 `EXPO_PUBLIC_API_URL=https://hupiao-api-beta.onrender.com`，再运行：
+
+```sh
+cd mobile
+npx eas-cli@latest update --channel preview --environment preview --message "简述本次变更"
+```
+
+先用 `preview` channel 验证内测包。确认无误后，再为 `production` 环境配置生产 API 地址，用 `production` channel 发布。不要把测试环境的后端地址发布给生产用户。每次更新前记录 EAS update group ID 和改动内容；发现问题时运行 `npx eas-cli@latest update:rollback`，按提示选择回退到上一个兼容更新或内置版本。原生代码改动不能通过 OTA 回滚，需重新构建。
+
+OTA 更新在应用启动时会自动检查并下载，通常下次启动后生效；“我的”页面也提供手动检查与立即重启入口。EAS Update API 的完整行为要在安装过 preview 或 production 的 release APK/IPA 上验证，开发服务器和 Expo Go 不能代表真机发布行为。
+
 ## 尚未通过的发布门槛
 
 - 本机没有 Android SDK / Xcode，安卓通过 EAS 云构建；iOS 尚未构建，也没有完成真机内测。

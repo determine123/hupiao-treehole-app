@@ -12,19 +12,22 @@
       "env": {
         "EXPO_PUBLIC_API_URL": "https://hupiao-api-beta.onrender.com"
       },
-      "autoIncrement": true
+      "autoIncrement": true,
+      "channel": "preview"
     },
     "ios-simulator": {
       "extends": "preview",
       "ios": {
         "simulator": true
-      }
+      },
+      "channel": "preview"
     },
     "production": {
       "autoIncrement": true,
       "android": {
         "buildType": "app-bundle"
-      }
+      },
+      "channel": "production"
     }
   },
   "submit": {

@@ -36,6 +36,12 @@
         "projectId": "fcb18a23-ea73-426d-ae19-ef361fb1fdcf"
       }
     },
-    "owner": "determine123"
+    "owner": "determine123",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/fcb18a23-ea73-426d-ae19-ef361fb1fdcf"
+    }
   }
 }
