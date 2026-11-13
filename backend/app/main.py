@@ -463,17 +463,20 @@ def report(b: ReportInput, user=Depends(identity), session=Depends(database)):
     if obj.owner == user.id:
         raise HTTPException(422, "自己的内容可以直接删除")
     rate(session, "report:" + user.id, 20)
+    reported_at = now()
     session.execute(
         conflict_insert(Report, session)
         .values(
             id=str(uuid.uuid4()),
             owner=user.id,
             **b.model_dump(),
-            created=now(),
+            created=reported_at,
             status="open",
         )
-        .on_conflict_do_nothing(
-            index_elements=[Report.owner, Report.target_type, Report.target_id]
+        .on_conflict_do_update(
+            index_elements=[Report.owner, Report.target_type, Report.target_id],
+            set_={"reason": b.reason, "created": reported_at, "status": "open"},
+            where=Report.status == "resolved",
         )
     )
     session.commit()

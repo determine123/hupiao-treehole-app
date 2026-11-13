@@ -223,6 +223,41 @@ def test_report_queue_batches_targets_and_includes_private_parent_context(client
     assert all(row["parent_status"] == "hidden" for row in queue)
 
 
+def test_resolved_report_can_be_submitted_again(client):
+    a, reporter = user(client), user(client)
+    p = post(client, a)
+    approve(client, "post", p["id"])
+
+    def submit(reason):
+        response = client.post(
+            "/reports",
+            headers=reporter,
+            json={"target_type": "post", "target_id": p["id"], "reason": reason},
+        )
+        assert response.status_code == 201, response.text
+
+    submit("首次举报：请检查内容")
+    report_id = client.get("/admin/reports", headers=ADMIN).json()[0]["id"]
+    assert (
+        client.delete("/admin/reports/" + report_id, headers=ADMIN).status_code == 200
+    )
+    assert client.get("/admin/reports", headers=ADMIN).json() == []
+
+    submit("再次举报：补充了新的上下文")
+    queue = client.get("/admin/reports", headers=ADMIN).json()
+    assert len(queue) == 1
+    assert queue[0]["id"] == report_id
+    assert queue[0]["reason"] == "再次举报：补充了新的上下文"
+
+    # Repeating a report while it is still open must not rewrite its evidence.
+    submit("重复提交不应覆盖正在处理的举报")
+    queue = client.get("/admin/reports", headers=ADMIN).json()
+    assert len(queue) == 1
+    assert queue[0]["reason"] == "再次举报：补充了新的上下文"
+    with Session() as session:
+        assert session.scalar(select(Report.id).where(Report.id == report_id))
+
+
 def test_stale_duplicate_comment_deletion_does_not_remove_another_reply_count(client):
     from app.main import delete_comment
     from fastapi import HTTPException
