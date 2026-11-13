@@ -851,6 +851,52 @@ def reports(session=Depends(database)):
     return result
 
 
+@app.get("/admin/posts/{id}/discussion", dependencies=[Depends(admin)])
+def admin_discussion(
+    id: str,
+    cursor: str = Query(default="", max_length=180),
+    limit: int = Query(default=50, ge=1, le=100),
+    session=Depends(database),
+):
+    parent = session.get(Post, id)
+    if parent is None:
+        raise HTTPException(404, "讨论不存在")
+    statement = select(Comment).where(Comment.post == id)
+    if cursor:
+        created, comment_id = decode_cursor(cursor)
+        statement = statement.where(
+            or_(
+                Comment.created > created,
+                and_(Comment.created == created, Comment.id > comment_id),
+            )
+        )
+    rows = session.scalars(
+        statement.order_by(Comment.created, Comment.id).limit(limit + 1)
+    ).all()
+    return {
+        "post": {
+            "id": parent.id,
+            "title": parent.title,
+            "body": parent.body,
+            "category": parent.category,
+            "status": parent.status,
+            "created": parent.created,
+        },
+        "comments": [
+            {
+                "id": comment.id,
+                "body": comment.body,
+                "status": comment.status,
+                "created": comment.created,
+                "is_op": comment.owner == parent.owner,
+                "author": "过客 " + digest(comment.owner + ":" + parent.id)[:6].upper(),
+            }
+            for comment in rows[:limit]
+        ],
+        "next_cursor": encode_cursor(rows[limit - 1]) if len(rows) > limit else None,
+    }
+
+
 def serialize_feedback_rows(rows):
     return [
         {

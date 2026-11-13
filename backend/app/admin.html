@@ -4,7 +4,7 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>沪漂树洞内容管理</title>
 <style>
-body{max-width:900px;margin:24px auto;padding:20px;font:16px/1.7 system-ui;background:#122019;color:#e1eee5}input,button,textarea,select{font:inherit;padding:9px;border-radius:8px;box-sizing:border-box}input,textarea,select{background:#1b2c22;color:#e1eee5;border:1px solid #54715d}textarea{width:100%;min-height:85px}section{border:1px solid #54715d;padding:18px;margin:15px 0;border-radius:12px}button{cursor:pointer;border:1px solid #54715d;background:#d2e6d7;color:#122019}button:disabled{opacity:.5;cursor:wait}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}label{display:block}nav,.actions{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0}.muted,small{color:#b0c4b5}#message{color:#ffd6ac}.context{border-left:3px solid #8bb79a;padding-left:12px;margin:12px 0}.tag{border:1px solid #54715d;padding:2px 8px;border-radius:20px;font-size:13px}.active{background:#8bb79a}#key{width:min(100%,500px)}h1{margin-bottom:6px}h3{margin:8px 0}
+body{max-width:900px;margin:24px auto;padding:20px;font:16px/1.7 system-ui;background:#122019;color:#e1eee5}input,button,textarea,select{font:inherit;padding:9px;border-radius:8px;box-sizing:border-box}input,textarea,select{background:#1b2c22;color:#e1eee5;border:1px solid #54715d}textarea{width:100%;min-height:85px}section{border:1px solid #54715d;padding:18px;margin:15px 0;border-radius:12px}button{cursor:pointer;border:1px solid #54715d;background:#d2e6d7;color:#122019}button:disabled{opacity:.5;cursor:wait}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}label{display:block}nav,.actions{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0}.muted,small{color:#b0c4b5}#message{color:#ffd6ac}.context{border-left:3px solid #8bb79a;padding-left:12px;margin:12px 0}.thread-comment{border-top:1px solid #54715d;margin-top:10px;padding-top:10px}.tag{border:1px solid #54715d;padding:2px 8px;border-radius:20px;font-size:13px}.active{background:#8bb79a}#key{width:min(100%,500px)}h1{margin-bottom:6px}h3{margin:8px 0}
 </style>
 </head>
 <body>
@@ -35,6 +35,12 @@ async function api(path,method='GET',body){
  }finally{clearTimeout(timer);requests.delete(controller);}
 }
 function node(tag,text){const n=document.createElement(tag);n.textContent=text;return n;}
+function discussion(card,postId,targetId){
+ const details=node('details','');details.className='context';details.append(node('summary','完整讨论上下文'));
+ const list=node('div',''),status=node('small',''),more=node('button','加载讨论');more.type='button';let cursor='',started=false,count=0;
+ more.onclick=async()=>{const ticket=generation,view=loadId;more.disabled=true;more.hidden=false;status.textContent='正在读取完整讨论…';try{const suffix=cursor?'?'+new URLSearchParams({cursor}):'';const data=await api('posts/'+encodeURIComponent(postId)+'/discussion'+suffix);if(ticket!==generation||view!==loadId)return;if(!started){const post=node('div','');post.append(node('strong',data.post.title),node('pre',data.post.body),node('small',(labels[data.post.status]||data.post.status)+' · '+new Date(data.post.created).toLocaleString('zh-CN')+' · '+data.post.category));list.append(post);started=true;}for(const comment of data.comments){const row=node('div','');row.className='thread-comment';row.append(node('small',(labels[comment.status]||comment.status)+' · '+new Date(comment.created).toLocaleString('zh-CN')+' · '+comment.author+(comment.is_op?' · 楼主':'')+(comment.id===targetId?' · 当前被审核内容':'')),node('pre',comment.body));list.append(row);}count+=data.comments.length;cursor=data.next_cursor||'';more.textContent=cursor?'加载更多讨论':'已加载全部讨论';more.disabled=!cursor;more.hidden=!cursor;status.textContent='已加载 '+count+' 条回复'+(data.comments.length?'':'，这条讨论还没有回复。');}catch(e){if(ticket===generation&&view===loadId){status.textContent=e.name==='AbortError'?'请求超时，请重试。':e.message;more.disabled=false;more.hidden=false;}}};
+ details.append(list,status,more);card.append(details);
+}
 function summary(){const shown=currentKind==='queue'&&el('#filter').value!=='all'?rows.filter(r=>r.type===el('#filter').value):rows;el('#message').textContent=rows.length?'显示 '+shown.length+' / '+rows.length+' 条记录'+(currentKind==='queue'?'（每次最多读取 100 条帖子和 100 条回复）':''):'当前没有'+(currentKind==='queue'?'待审核内容':currentKind==='reports'?'待处理举报':currentKind==='audit'?'审核记录':'内测反馈')+'。';return shown;}
 function action(card,text,fn){const button=node('button',text);button.type='button';button.onclick=async()=>{const ticket=generation;const buttons=card.querySelectorAll('button');buttons.forEach(b=>b.disabled=true);try{await fn();}catch(e){if(ticket===generation)el('#message').textContent=e.name==='AbortError'?'请求超时，请刷新列表确认处理结果后再重试。':e.message;}finally{if(ticket===generation)buttons.forEach(b=>b.disabled=false);}};return button;}
 function render(){
@@ -51,6 +57,7 @@ function render(){
   if(currentKind==='audit'){card.replaceChildren(node('h3',(labels[r.target_type]||r.target_type)+' · '+(labels[r.decision]||r.decision)),node('p',new Date(r.created).toLocaleString('zh-CN')),node('small','内容编号：'+r.target_id),node('p','给作者的说明：'+(r.reason||'未填写')),node('pre','内部记录：'+r.note));el('#list').append(card);continue;}
   card.append(node('pre',r.body),node('small',currentKind==='reports'?'举报编号：'+r.id+' · 内容编号：'+r.target_id:'编号：'+r.id));
   if(r.reason)card.append(node('p','举报原因：'+r.reason));
+  if(r.type==='comment'&&(currentKind==='queue'||currentKind==='reports'))discussion(card,r.post,r.target_id||r.id);
   if(currentKind==='feedback'){
    card.append(node('p','设备：'+r.device+' / 版本：'+r.app_version));
    const response=node('textarea','');response.value=r.response||'';response.placeholder='回复测试者';response.setAttribute('aria-label','反馈回复');

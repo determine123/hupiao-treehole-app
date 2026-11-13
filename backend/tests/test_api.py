@@ -688,6 +688,70 @@ def test_review_queue_includes_parent_context_only_for_admin(client):
     assert len(comment["parent_excerpt"]) == 500
 
 
+def test_admin_can_page_full_discussion_context(client):
+    a = user(client)
+    p = post(client, a)
+    approve(client, "post", p["id"])
+    with Session() as session:
+        parent = session.get(Post, p["id"])
+        rows = [
+            Comment(
+                post=parent.id,
+                owner=parent.owner,
+                body=f"上下文回复 {index}",
+                status=status,
+                created=parent.created + index,
+            )
+            for index, status in enumerate(("active", "pending", "hidden"), start=1)
+        ]
+        session.add_all(rows)
+        session.flush()
+        expected = [row.id for row in rows]
+        session.commit()
+        parent_body = parent.body
+    assert (
+        client.get("/admin/posts/" + p["id"] + "/discussion", headers=a).status_code
+        == 403
+    )
+    first = client.get(
+        "/admin/posts/" + p["id"] + "/discussion",
+        headers=ADMIN,
+        params={"limit": 2},
+    )
+    assert first.status_code == 200
+    first = first.json()
+    assert first["post"]["id"] == p["id"] and first["post"]["body"] == parent_body
+    assert [row["id"] for row in first["comments"]] == expected[:2]
+    assert [row["status"] for row in first["comments"]] == ["active", "pending"]
+    assert all("owner" not in row and "secret_hash" not in row for row in first["comments"])
+    assert all(row["author"].startswith("过客 ") for row in first["comments"])
+    assert first["next_cursor"]
+    second = client.get(
+        "/admin/posts/" + p["id"] + "/discussion",
+        headers=ADMIN,
+        params={"limit": 2, "cursor": first["next_cursor"]},
+    ).json()
+    assert [row["id"] for row in second["comments"]] == expected[2:]
+    assert second["comments"][0]["status"] == "hidden"
+    assert second["next_cursor"] is None
+    assert (
+        client.get(
+            "/admin/posts/00000000-0000-0000-0000-000000000000/discussion",
+            headers=ADMIN,
+        ).status_code
+        == 404
+    )
+    for params in ({"limit": 0}, {"limit": 101}, {"cursor": "bad"}):
+        assert (
+            client.get(
+                "/admin/posts/" + p["id"] + "/discussion",
+                headers=ADMIN,
+                params=params,
+            ).status_code
+            == 422
+        )
+
+
 def test_moderation_history_separates_private_notes_and_owner_access(client):
     a, b = user(client), user(client)
     pa, pb = post(client, a), post(client, b)
